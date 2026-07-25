@@ -374,6 +374,7 @@ function mapWorkflowStatus(raw: Record<string, unknown>): WorkflowStatus {
       studioPath:
         typeof output?.studioPath === "string" ? output.studioPath : undefined,
       error: found?.error ? String(found.error) : undefined,
+      output,
     };
   });
 
@@ -427,6 +428,64 @@ function mapPassages(raw: unknown): RAGPassage[] {
       similarityScore: Number(p.similarityScore ?? p.score ?? 0),
       scope: String(p.scope ?? "company_memory"),
     }));
+}
+
+function tryParseRoadmap(raw: string): RoadmapSummary | null {
+  try {
+    const parsed = JSON.parse(raw) as RoadmapSummary;
+    if (parsed && Array.isArray(parsed.weeks)) return parsed;
+  } catch {
+    /* not JSON / not UI shape */
+  }
+  return null;
+}
+
+/** Map engine ExperimentationRoadmap → Simple UI RoadmapSummary. */
+function roadmapFromEngine(raw: unknown): RoadmapSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as {
+    title?: string;
+    durationWeeks?: number;
+    entries?: Array<{
+      weekNumber?: number;
+      theme?: string;
+      businessObjectiveRef?: string;
+    }>;
+  };
+  if (Array.isArray(r.entries) && r.entries.length > 0) {
+    return {
+      title: r.title?.trim() || "Experiment roadmap",
+      summary: `${r.durationWeeks ?? r.entries.length} week plan · ${r.entries.length} slots`,
+      weeks: r.entries.map((e, i) => ({
+        week: e.weekNumber ?? i + 1,
+        theme: e.theme?.trim() || `Week ${e.weekNumber ?? i + 1}`,
+        objective: e.businessObjectiveRef?.trim() || e.theme?.trim() || "",
+      })),
+    };
+  }
+  return null;
+}
+
+function hypothesisFromEngine(
+  output: Record<string, unknown> | undefined,
+  platform: SocialPlatform,
+): HypothesisCard | null {
+  if (!output) return null;
+  const hyp = (output.hypothesis ?? output) as {
+    id?: string;
+    hook?: string;
+    angle?: string;
+    theme?: string;
+  };
+  if (typeof hyp.hook !== "string" || !hyp.hook.trim()) return null;
+  return {
+    id: hyp.id?.trim() || "hyp-live",
+    hook: hyp.hook.trim(),
+    angle: hyp.angle?.trim() || hyp.theme?.trim(),
+    platform,
+    status: "draft_review",
+    title: hyp.theme?.trim(),
+  };
 }
 
 const statusListeners = new Set<() => void>();
@@ -1286,19 +1345,28 @@ Answer:`;
     const hypCp = status.checkpoints.find(
       (c) => c.stage === "HypothesisReview",
     );
+    const roadmapStage = status.stages.find(
+      (s) => s.stage === "RoadmapGeneration",
+    );
+    const hypStage = status.stages.find(
+      (s) => s.stage === "HypothesisGeneration",
+    );
+
     let roadmap: RoadmapSummary | null = null;
-    let roadmapText: string | null = roadmapCp?.pendingOutput ?? null;
+    let roadmapText: string | null = null;
+
     if (roadmapCp?.pendingOutput) {
-      try {
-        const parsed = JSON.parse(roadmapCp.pendingOutput) as RoadmapSummary;
-        if (parsed && Array.isArray(parsed.weeks)) {
-          roadmap = parsed;
-          roadmapText = null;
-        }
-      } catch {
-        /* keep raw text */
-      }
+      const fromCp = tryParseRoadmap(roadmapCp.pendingOutput);
+      if (fromCp) roadmap = fromCp;
+      else roadmapText = roadmapCp.pendingOutput;
     }
+    if (!roadmap && roadmapStage?.output?.roadmap) {
+      roadmap = roadmapFromEngine(roadmapStage.output.roadmap);
+    }
+    if (!roadmap && !roadmapText && roadmapStage?.summary) {
+      roadmapText = roadmapStage.summary;
+    }
+
     let hypotheses: HypothesisCard[] = [];
     if (hypCp?.pendingOutput) {
       try {
@@ -1314,6 +1382,13 @@ Answer:`;
           },
         ];
       }
+    }
+    if (hypotheses.length === 0) {
+      const fromStage = hypothesisFromEngine(
+        hypStage?.output,
+        status.platforms[0] ?? "linkedin",
+      );
+      if (fromStage) hypotheses = [fromStage];
     }
     return { roadmap, roadmapText, hypotheses };
   },

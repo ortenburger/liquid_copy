@@ -5,9 +5,15 @@ import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
 import { CarouselCardGrid } from "../../components/open-carousel/CarouselCardGrid";
 import { ParsedOutput } from "../../components/workspace/ParsedOutput";
+import { WorkflowStagesPanel } from "../../components/workspace/WorkflowStagesPanel";
 import { DEMO_QUEUED_CAROUSELS } from "../../data/demo";
 import { api } from "../../lib/api";
-import { useAsyncAction, useDataMode } from "../../lib/hooks";
+import {
+  useAsyncAction,
+  useDataMode,
+  useLiveStatusError,
+  useWorkflowStatus,
+} from "../../lib/hooks";
 import {
   fetchOpenCarousels,
   openCarouselEditorUrl,
@@ -27,6 +33,8 @@ function statusTone(status: HypothesisCard["status"]) {
 
 export function TestingPlanPage() {
   const { simulation } = useDataMode();
+  const workflowStatus = useWorkflowStatus();
+  const liveError = useLiveStatusError();
   const { busy, error: actionError, run, clearError } = useAsyncAction();
   const [roadmap, setRoadmap] = useState<RoadmapSummary | null>(null);
   const [roadmapText, setRoadmapText] = useState<string | null>(null);
@@ -61,7 +69,13 @@ export function TestingPlanPage() {
     return () => {
       cancelled = true;
     };
-  }, [simulation, reloadKey]);
+  }, [
+    simulation,
+    reloadKey,
+    workflowStatus.currentStage,
+    // Re-load plan when stage statuses change (e.g. after Run / kickstart).
+    workflowStatus.stages.map((s) => `${s.stage}:${s.status}`).join("|"),
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +110,11 @@ export function TestingPlanPage() {
   function openCarousel(item: OpenCarouselItem) {
     const baseUrl = loadSettings().openCarouselBaseUrl;
     if (item.id.startsWith("demo-")) {
-      window.open(baseUrl.replace(/\/$/, "") || "http://localhost:3000", "_blank", "noopener,noreferrer");
+      window.open(
+        baseUrl.replace(/\/$/, "") || "http://localhost:3000",
+        "_blank",
+        "noopener,noreferrer",
+      );
       return;
     }
     window.open(
@@ -121,7 +139,10 @@ export function TestingPlanPage() {
   }
 
   const hasPlan = Boolean(roadmap || roadmapText || hypotheses.length > 0);
-  const displayError = error ?? actionError;
+  const displayError = error ?? actionError ?? liveError;
+  const processing = workflowStatus.stages.some(
+    (s) => s.status === "in_progress" || s.status === "awaiting_approval",
+  );
 
   return (
     <div className="page stagger-in">
@@ -131,6 +152,31 @@ export function TestingPlanPage() {
           <h1 className="page-title">Testing plan</h1>
         </div>
         <div className="mode-toggle">
+          {!simulation ? (
+            <>
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    await api.runWorkflow();
+                    reload();
+                  })
+                }
+              >
+                Run workflow
+              </Button>
+              <Button
+                variant={
+                  workflowStatus.mode === "Full_Auto_Mode" ? "accent" : "ghost"
+                }
+                disabled={busy}
+                onClick={() => run(() => api.setMode("Full_Auto_Mode"))}
+              >
+                Full auto
+              </Button>
+            </>
+          ) : null}
           <Button
             variant="accent"
             disabled={busy}
@@ -143,8 +189,16 @@ export function TestingPlanPage() {
 
       <p className="page-lead">
         Kickstart a roadmap and hypotheses here — or ask{" "}
-        <Link to="/app">Chat</Link> to generate and approve stages.
+        <Link to="/app">Chat</Link> to generate and approve stages. Workflow
+        progress below mirrors the full Overview stage rail.
       </p>
+
+      <Progress
+        active={busy || processing}
+        label="Agents advancing the experiment loop"
+      />
+
+      <WorkflowStagesPanel status={workflowStatus} />
 
       <section className="panel">
         <div className="panel-head">
@@ -180,9 +234,7 @@ export function TestingPlanPage() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">
-            {roadmap?.title ?? "Roadmap"}
-          </h2>
+          <h2 className="panel-title">{roadmap?.title ?? "Roadmap"}</h2>
           <span className="panel-meta">
             {roadmap ? `${roadmap.weeks.length} weeks` : "plan"}
           </span>

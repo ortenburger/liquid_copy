@@ -211,7 +211,7 @@ export function SettingsPage() {
             navigate("/app", { replace: true });
           }}
           label="Simple UI"
-          description="Reduce navigation to Chat (agent), Testing plan, Test, Analytics, and Settings."
+          description="Reduce navigation to Chat (with live workflow stages), Testing plan, Test, Analytics, and Settings."
         />
       </section>
 

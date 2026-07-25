@@ -4,13 +4,14 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { TextArea } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
+import { WorkflowStagesPanel } from "../../components/workspace/WorkflowStagesPanel";
 import {
   api,
   type AgentToolEvent,
   type ChatMessage,
   type RagMarkdownSource,
 } from "../../lib/api";
-import { useDataMode } from "../../lib/hooks";
+import { useDataMode, useWorkflowStatus } from "../../lib/hooks";
 import { loadSettings } from "../../lib/settings";
 import type { RAGPassage } from "../../lib/types";
 import "./workspace.css";
@@ -36,6 +37,7 @@ const QUICK_PROMPTS = [
 
 export function ChatPage() {
   const { simulation } = useDataMode();
+  const workflowStatus = useWorkflowStatus();
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     msg(
       "assistant",
@@ -104,8 +106,11 @@ export function ChatPage() {
 
       <p className="page-lead">
         Main workspace. Grounded in RAG + KB markdown + analytics tools. Open{" "}
-        <Link to="/app/analytics">Analytics</Link> or just ask here.
+        <Link to="/app/testing-plan">Testing plan</Link> for the full stage
+        rail, or <Link to="/app/analytics">Analytics</Link>.
       </p>
+
+      <WorkflowStagesPanel status={workflowStatus} />
 
       {error ? <p className="error-banner">{error}</p> : null}
 
