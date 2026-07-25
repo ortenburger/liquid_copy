@@ -1,0 +1,62 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font: var(--text-label-micro);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge-active {
+  color: var(--status-active);
+  background: var(--status-active-bg);
+}
+
+.badge-processing {
+  color: var(--status-processing);
+  background: var(--status-processing-bg);
+}
+
+.badge-failed {
+  color: var(--status-failed);
+  background: var(--status-failed-bg);
+}
+
+.badge-idle {
+  color: var(--status-idle);
+  background: var(--status-idle-bg);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--outline-hairline);
+  background: transparent;
+  color: var(--on-surface);
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  cursor: default;
+  transition:
+    border-color var(--duration-fast) var(--ease-spring),
+    background var(--duration-fast) var(--ease-spring),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:active {
+  transform: scale(0.97);
+}
+
+.chip-selected {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, white);
+  color: var(--secondary);
+}

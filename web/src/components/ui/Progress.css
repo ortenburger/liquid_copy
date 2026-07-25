@@ -1,0 +1,44 @@
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  width: 100%;
+}
+
+.progress-track {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--surface-container-high);
+}
+
+.progress-liquid {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--accent),
+    var(--secondary-container),
+    transparent
+  );
+  animation: liquid-flow 1.4s var(--ease-spring) infinite;
+}
+
+.progress-label {
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-surface-variant);
+}
+
+.stream-caret {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: caret-pulse 1s steps(1) infinite;
+}

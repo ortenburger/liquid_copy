@@ -59,20 +59,23 @@ Vendored carousel app: [`open-carrusel/`](./open-carrusel) (Next.js, local Claud
 
 ```
 liquid_copy/
-├── src/lib/content-creator-ai/   # Shared platform library
+├── src/lib/content-creator-ai/   # Shared platform library + agents
 │   ├── types/
 │   ├── kb/
 │   ├── rag/
 │   ├── orchestration/
-│   ├── agents/                   # Agent implementations (in progress)
+│   ├── agents/
 │   ├── integrations/
 │   ├── publishing/
 │   └── api/
+├── src/app/api/content-creator-ai/  # Next-shaped API route handlers
+├── web/                          # Vite operator UI (landing + workspace)
 ├── tests/pbt/                    # Property-based tests (fast-check + Vitest)
 ├── open-carrusel/                # Carousel generation UI + API
+├── design.md                     # Liquid Intelligence design system
 ├── .kiro/specs/content-creator-ai/
 ├── tasklist_1.md                 # Shared foundation (done)
-├── tasklist_2.md                 # Ingestion, strategy, audience, workflow, API
+├── tasklist_2.md                 # Ingestion, strategy, audience, workflow, API (done)
 └── tasklist_3.md                 # Content, publishing, analytics, learning (done)
 ```
 
@@ -93,6 +96,9 @@ liquid_copy/
 # Platform library
 npm install
 
+# Operator UI (Vite)
+cd web && npm install && cd ..
+
 # Open Carrusel (carousel generator)
 cd open-carrusel && npm install && cd ..
 ```
@@ -106,6 +112,7 @@ cd open-carrusel && npm install && cd ..
 | `LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama-compatible embeddings endpoint |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
 | `RAG_FORCE_LOCAL_EMBED` | unset | Set `1` to use deterministic local embeddings (tests / offline) |
+| `VITE_API_BASE_URL` | unset | Optional live API origin for the Vite UI (defaults to in-app demo store) |
 
 ---
 
@@ -115,6 +122,8 @@ cd open-carrusel && npm install && cd ..
 npm test          # Run Vitest (including property-based tests)
 npm run test:watch
 npm run typecheck
+npm run web:dev   # Liquid Intelligence UI → http://localhost:5173
+npm run web:build
 
 # Open Carrusel
 cd open-carrusel
@@ -155,7 +164,7 @@ import { eventBus } from "@/lib/content-creator-ai/orchestration/event-bus";
 | Track | Scope | Status |
 |---|---|---|
 | **Task list 1** | Types, KB, RAG, Event Bus | Done |
-| **Task list 2** | Context / Strategy / Audience agents, workflow, API | In progress |
+| **Task list 2** | Context / Strategy / Audience agents, workflow, API | Done |
 | **Task list 3** | Content / Analytics / Learning agents, publishing | Done |
 
 ---

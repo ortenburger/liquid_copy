@@ -6,7 +6,9 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "web:dev": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

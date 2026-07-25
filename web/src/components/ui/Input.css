@@ -1,0 +1,54 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  width: 100%;
+}
+
+.field-label {
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+}
+
+.field-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--outline-hairline);
+  border-radius: var(--radius);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  transition: border-color var(--duration-fast) var(--ease-spring);
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: var(--primary-container);
+}
+
+.field-ai .field-input {
+  background: var(--muted);
+  padding-right: 28px;
+  border-color: transparent;
+}
+
+.field-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.ai-caret {
+  position: absolute;
+  right: 12px;
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  animation: caret-pulse 1.1s ease-in-out infinite;
+}

@@ -1,0 +1,107 @@
+.landing {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+.landing-atmosphere {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 70% -10%, rgba(233, 69, 96, 0.14), transparent 55%),
+    radial-gradient(ellipse 60% 50% at 10% 90%, rgba(26, 26, 46, 0.08), transparent 50%),
+    linear-gradient(180deg, #fbf9f9 0%, #fafafa 45%, #f5f3f3 100%);
+  pointer-events: none;
+}
+
+.landing-atmosphere::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+  background-image: linear-gradient(
+      to right,
+      color-mix(in srgb, var(--outline-hairline) 70%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--outline-hairline) 70%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent);
+}
+
+.landing-nav {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: var(--space-lg);
+}
+
+.landing-mark {
+  font: var(--text-body-bold);
+  letter-spacing: -0.02em;
+}
+
+.landing-nav-link {
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+}
+
+.landing-nav-link:hover {
+  color: var(--accent);
+}
+
+.landing-hero {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 88px);
+  padding-bottom: var(--space-xl);
+  max-width: 720px;
+}
+
+.landing-brand {
+  font: var(--text-display-lg);
+  letter-spacing: -0.02em;
+  color: var(--primary);
+  margin-bottom: var(--space-lg);
+}
+
+@media (max-width: 640px) {
+  .landing-brand {
+    font-size: 36px;
+    line-height: 44px;
+  }
+}
+
+.landing-headline {
+  font: var(--text-headline-md);
+  letter-spacing: -0.01em;
+  color: var(--on-surface);
+  margin-bottom: var(--space-md);
+  max-width: 28ch;
+}
+
+.landing-support {
+  font: var(--text-body);
+  color: var(--on-surface-variant);
+  line-height: 1.5;
+  max-width: 46ch;
+  margin-bottom: var(--space-xl);
+}
+
+.landing-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
