@@ -44,7 +44,6 @@ import {
   simulatedPublishesToAnalyticsRows,
   simulatedPublishesToExperimentCards,
 } from "./zernio-simulate";
-import { listQueuedCarousels } from "./carousel-queue-store";
 import type {
   AnalyticsRow,
   AnalyticsSummary,
