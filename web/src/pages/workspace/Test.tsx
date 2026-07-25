@@ -221,7 +221,12 @@ export function TestPage() {
           </Button>
         </div>
         <Progress active={busy} label="Creating Open Carrusel deck" />
-        {msg ? <p className="info-banner">{msg}</p> : null}
+        {msg ? (
+          <p className="info-banner">
+            {msg}{" "}
+            <Link to="/app/analytics">Open Analytics →</Link>
+          </p>
+        ) : null}
         {displayError ? <p className="error-banner">{displayError}</p> : null}
       </section>
 
