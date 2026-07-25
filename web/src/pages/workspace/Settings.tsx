@@ -32,6 +32,11 @@ export function SettingsPage() {
   const [apiHealth, setApiHealth] = useState<string | null>(null);
   const [zernioSimOut, setZernioSimOut] = useState<string | null>(null);
   const [zernioSimBusy, setZernioSimBusy] = useState(false);
+  const [testOut, setTestOut] = useState<{
+    ok: boolean;
+    message: string;
+    sample?: string;
+  } | null>(null);
 
   const llm = settings.llm;
   const preset = PROVIDER_PRESETS[llm.provider];
