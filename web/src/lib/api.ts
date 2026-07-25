@@ -10,6 +10,7 @@ import type {
 import { DEMO_QUEUED_CAROUSELS } from "../data/demo";
 import { demoStore } from "./demo-store";
 import { completeWithSettings } from "./llm-browser";
+import { draftCarouselBriefs } from "./carousel-brief";
 import { upsertQueuedCarousel } from "./carousel-queue-store";
 import {
   buildDemoQueuedCarousel,
@@ -17,7 +18,12 @@ import {
   type OpenCarouselItem,
   type QueueOpenCarouselOptions,
 } from "./open-carousel";
-import { getApiBaseUrl, isDemoWorkspace, loadSettings } from "./settings";
+import {
+  getApiBaseUrl,
+  isDemoWorkspace,
+  loadSettings,
+  saveSettings,
+} from "./settings";
 import { PLAN_CHECKPOINT_STAGES } from "./simple-ui-nav";
 import type {
   AnalyticsRow,
@@ -883,22 +889,37 @@ Answer:`;
         const parsed = tryParseJson<{
           idea?: string;
           name?: string;
+          audience?: string;
+          platform?: string;
+          tone?: string;
+          cta?: string;
+          slideCount?: number;
           aspectRatio?: "1:1" | "4:5" | "9:16";
-          slides?: Array<{ title: string; subtitle: string }>;
+          slides?: Array<{
+            title: string;
+            subtitle: string;
+            role?: string;
+            eyebrow?: string;
+          }>;
         }>(arg);
         const idea = parsed?.idea?.trim() || arg;
         if (!idea) {
           return {
             name,
             output:
-              'Provide an idea, e.g. JSON {"idea":"…","slides":[{"title":"…","subtitle":"…"}]}',
+              'Provide an idea, e.g. JSON {"idea":"…","audience":"…","slides":[{"role":"hook","title":"…","subtitle":"…"}]}',
           };
         }
         const item = await this.queueCarouselFromIdea({
           idea,
           name: parsed?.name,
+          audience: parsed?.audience,
+          platform: parsed?.platform,
+          tone: parsed?.tone,
+          cta: parsed?.cta,
+          slideCount: parsed?.slideCount,
           aspectRatio: parsed?.aspectRatio,
-          slides: parsed?.slides,
+          slides: parsed?.slides as QueueOpenCarouselOptions["slides"],
         });
         return {
           name,
@@ -979,6 +1000,23 @@ Answer:`;
           output: `Saved to KB + RAG · ${saved.entityId} v${saved.versionNumber} · ${saved.entityType}${saved.append ? " (appended)" : ""}. Reindexed for retrieval.`,
         };
       }
+      case "ingest_website": {
+        const parsed = tryParseJson<{ url?: string }>(arg);
+        const url = (parsed?.url ?? arg).trim();
+        if (!url || url === "https://" || url === "http://") {
+          return {
+            name,
+            output:
+              'Provide a URL, e.g. JSON {"url":"https://example.com"} or the bare URL.',
+          };
+        }
+        const result = await this.ingestWebsite(url);
+        return {
+          name,
+          input: url,
+          output: JSON.stringify(result, null, 2),
+        };
+      }
       default:
         return { name, input: arg, output: `Unknown tool: ${name}` };
     }
@@ -1024,6 +1062,7 @@ Answer:`;
           this.checkpointAction(stage, action),
         getAnalytics: () => this.getAnalytics(),
         saveToRag: (input) => this.saveToRag(input),
+        ingestWebsite: (url) => this.ingestWebsite(url),
       },
     });
 
@@ -1179,6 +1218,15 @@ Answer:`;
     if (!companyUrl || companyUrl === "https://" || companyUrl === "http://") {
       throw new Error("Enter a full company URL (e.g. https://example.com).");
     }
+    const settings = loadSettings();
+    if (!settings.firecrawlApiKey.trim()) {
+      throw new Error(
+        "Add a Firecrawl API key in Settings, Save, then retry ingest.",
+      );
+    }
+    if (settings.lastFirecrawlUrl !== companyUrl) {
+      saveSettings({ ...settings, lastFirecrawlUrl: companyUrl });
+    }
     await this.syncConfig();
     const drafted = await liveFetch<{
       status?: string;
@@ -1189,6 +1237,7 @@ Answer:`;
     }>("/api/content-creator-ai/ingest", {
       method: "POST",
       body: JSON.stringify({ companyUrl }),
+      signal: AbortSignal.timeout(180_000),
     });
 
     // URL scrapes return a review draft — auto-commit so Knowledge search works.
@@ -1196,9 +1245,73 @@ Answer:`;
       return liveFetch("/api/content-creator-ai/ingest", {
         method: "POST",
         body: JSON.stringify({ action: "accept", draftId: drafted.draftId }),
+        signal: AbortSignal.timeout(60_000),
       });
     }
     return drafted;
+  },
+
+  /**
+   * Agent-facing Firecrawl ingest: scrape URL → company markdown KB → RAG.
+   * Wraps ingestCompany with a stable success/error shape for tools.
+   */
+  async ingestWebsite(url: string): Promise<{
+    ok: boolean;
+    url: string;
+    status?: string;
+    name?: string;
+    kbVersion?: string;
+    warnings?: string[];
+    message: string;
+  }> {
+    const normalized = url.trim();
+    try {
+      const raw = (await this.ingestCompany(normalized)) as {
+        status?: string;
+        warnings?: string[];
+        companySummary?: { name?: string };
+        kbVersion?: string;
+        draftId?: string;
+      };
+
+      if (raw.status === "firecrawl_error") {
+        const warning =
+          raw.warnings?.[0] ??
+          "Firecrawl could not scrape that URL. Check the key and try again.";
+        return {
+          ok: false,
+          url: normalized,
+          status: raw.status,
+          warnings: raw.warnings,
+          message: warning,
+        };
+      }
+
+      const name = raw.companySummary?.name?.trim();
+      const kbVersion = raw.kbVersion;
+      return {
+        ok: true,
+        url: normalized,
+        status: raw.status ?? "accepted",
+        name,
+        kbVersion,
+        warnings: raw.warnings,
+        message: [
+          "Ingested via Firecrawl into KB + RAG",
+          name ? `· ${name}` : null,
+          kbVersion ? `· KB ${kbVersion}` : null,
+          "· searchable in Knowledge / chat",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        url: normalized,
+        message: e instanceof Error ? e.message : String(e),
+      };
+    }
   },
 
   async listExperiments(): Promise<ExperimentCard[]> {
@@ -1413,19 +1526,60 @@ Answer:`;
 
   /**
    * Queue a carousel from an idea/concept (agent or Test tab).
-   * Simulation: local preview card. Real: Open Carrusel + seeded slides.
+   * Drafts a strong slide outline via LLM when slides are thin/missing,
+   * grounds copy in RAG/KB when available, then seeds Open Carrusel.
    */
   async queueCarouselFromIdea(
-    input: QueueOpenCarouselOptions & { idea: string },
+    input: QueueOpenCarouselOptions & {
+      idea: string;
+      slideCount?: number;
+    },
   ): Promise<OpenCarouselItem> {
     const idea = input.idea.trim();
     if (!idea) throw new Error("Provide an idea or concept to queue a carousel.");
 
+    let slides = input.slides;
+    let name = input.name?.trim() || undefined;
+
+    // Upgrade thin/missing outlines with an LLM draft grounded in KB context.
+    if (!slides || slides.length < 4) {
+      const gathered = await this.gatherRagMarkdownContext(idea, {
+        limit: 4,
+      }).catch(() => ({ passages: [], markdownSources: [] }));
+      const context = [
+        ...gathered.markdownSources.map(
+          (m) => `[${m.entityId}]\n${m.markdown.slice(0, 900)}`,
+        ),
+        ...gathered.passages.map(
+          (p) => `[rag:${p.sourceDoc}]\n${p.content.slice(0, 400)}`,
+        ),
+      ]
+        .join("\n\n")
+        .slice(0, 3500);
+
+      const drafted = await draftCarouselBriefs(loadSettings().llm, {
+        idea,
+        name,
+        audience: input.audience,
+        platform: input.platform,
+        tone: input.tone,
+        cta: input.cta,
+        slideCount: input.slideCount ?? 5,
+        context,
+      });
+      slides = drafted.slides;
+      name = name || drafted.name;
+    }
+
     const options: QueueOpenCarouselOptions = {
       idea,
-      name: input.name?.trim() || undefined,
+      name,
       aspectRatio: input.aspectRatio,
-      slides: input.slides,
+      audience: input.audience,
+      platform: input.platform,
+      tone: input.tone,
+      cta: input.cta,
+      slides,
     };
 
     let item: OpenCarouselItem;
@@ -1476,8 +1630,8 @@ Answer:`;
   },
 
   /**
-   * Create a Zernio post (live publish or draft) from a queued carousel.
-   * Simulation: local success. Real: POST https://zernio.com/api/v1/posts
+   * Publish a carousel to Zernio as a multi-image post:
+   * Open Carrusel PNG export → Zernio media presign/upload → POST /v1/posts.
    */
   async publishCarouselToZernio(carousel: OpenCarouselItem): Promise<{
     ok: boolean;
@@ -1487,6 +1641,7 @@ Answer:`;
     message: string;
     zernioPostId?: string;
     platformPostUrl?: string;
+    mediaCount?: number;
   }> {
     const postVariantId =
       carousel.postVariantId ||
@@ -1498,7 +1653,8 @@ Answer:`;
         mode: "simulation",
         postVariantId,
         publishedAt: new Date().toISOString(),
-        message: `Simulation · registered ${postVariantId} with Zernio (demo).`,
+        message: `Simulation · would export ${carousel.slideCount || carousel.slides?.length || 0} slide PNGs and post a multi-image carousel to Zernio.`,
+        mediaCount: carousel.slideCount || carousel.slides?.length || 0,
       };
     }
 
@@ -1506,6 +1662,11 @@ Answer:`;
     if (!s.zernioApiKey.trim()) {
       throw new Error(
         "Add your Zernio API key in Settings, switch to real-data mode, Save, then retry.",
+      );
+    }
+    if (!s.openCarouselBaseUrl.trim()) {
+      throw new Error(
+        "Set Open Carrusel base URL in Settings so slides can be exported to PNG before Zernio publish.",
       );
     }
 
@@ -1536,8 +1697,11 @@ Answer:`;
         message?: string;
         zernioPostId?: string;
         platformPostUrl?: string;
+        mediaCount?: number;
       }>("/api/content-creator-ai/zernio/publish", {
         method: "POST",
+        // PNG export + media uploads can take a while (Puppeteer).
+        signal: AbortSignal.timeout(180_000),
         body: JSON.stringify({
           postVariantId,
           carouselId: carousel.id,
@@ -1549,6 +1713,7 @@ Answer:`;
           aspectRatio: carousel.aspectRatio,
           slideCount: carousel.slideCount,
           slideTexts,
+          openCarouselBaseUrl: s.openCarouselBaseUrl,
         }),
       });
 
@@ -1560,6 +1725,7 @@ Answer:`;
         message: raw.message ?? "Zernio response received",
         zernioPostId: raw.zernioPostId,
         platformPostUrl: raw.platformPostUrl,
+        mediaCount: raw.mediaCount,
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

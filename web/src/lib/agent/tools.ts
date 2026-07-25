@@ -11,7 +11,7 @@ import type {
   WorkflowStatus,
 } from "../types";
 import type { AnalyticsSummary } from "../types";
-import type { OpenCarouselItem } from "../open-carousel";
+import type { OpenCarouselItem, QueueOpenCarouselOptions } from "../open-carousel";
 import type { SaveToRagInput } from "./types";
 
 export interface LiquidCopyToolDeps {
@@ -36,12 +36,9 @@ export interface LiquidCopyToolDeps {
     roadmapText: string | null;
     hypotheses: HypothesisCard[];
   }>;
-  queueCarouselFromIdea: (input: {
-    idea: string;
-    name?: string;
-    aspectRatio?: "1:1" | "4:5" | "9:16";
-    slides?: Array<{ title: string; subtitle: string }>;
-  }) => Promise<OpenCarouselItem>;
+  queueCarouselFromIdea: (
+    input: QueueOpenCarouselOptions & { idea: string; slideCount?: number },
+  ) => Promise<OpenCarouselItem>;
   getWorkflowStatus: () => Promise<WorkflowStatus>;
   checkpointAction: (
     stage: ApprovalCheckpointStage,
@@ -53,6 +50,16 @@ export interface LiquidCopyToolDeps {
     entityType: string;
     versionNumber: number;
     append: boolean;
+  }>;
+  /** Firecrawl scrape → company markdown KB + RAG reindex. */
+  ingestWebsite: (url: string) => Promise<{
+    ok: boolean;
+    url: string;
+    status?: string;
+    name?: string;
+    kbVersion?: string;
+    warnings?: string[];
+    message: string;
   }>;
 }
 
@@ -191,6 +198,20 @@ export function createLiquidCopyTools(deps: LiquidCopyToolDeps) {
       },
     }),
 
+    ingest_website: tool({
+      description:
+        "Scrape a company website with Firecrawl and ingest the content into the markdown knowledge base + RAG index. Use when the user asks to scrape, crawl, ingest, or load a domain/URL into knowledge. Requires real-data mode and a Firecrawl API key in Settings.",
+      inputSchema: z.object({
+        url: z
+          .string()
+          .url()
+          .describe(
+            "Full website URL to scrape, e.g. https://example.com (include https://)",
+          ),
+      }),
+      execute: async ({ url }) => deps.ingestWebsite(url),
+    }),
+
     generate_testing_plan: tool({
       description:
         "Generate or regenerate the testing plan (roadmap + hypotheses). Use when the user asks to create, kickstart, or regenerate a testing plan.",
@@ -288,51 +309,105 @@ export function createLiquidCopyTools(deps: LiquidCopyToolDeps) {
 
     queue_carousel: tool({
       description:
-        "Queue an Open Carrusel deck from an idea or concept discussed in the conversation (or given in the instruction). Prefer extracting the idea from recent chat. Optionally pass slide titles/subtitles you draft from that concept. The deck appears on the Test tab for preview + Zernio publish.",
+        "Create a high-quality swipeable carousel from an idea/concept in the conversation. ALWAYS draft a full 5-slide outline (hook → problem → insight → proof → CTA) in the slides array, grounded in the idea and any company/KB context. The deck is queued on the Test tab for preview + Zernio publish.",
       inputSchema: z.object({
         idea: z
           .string()
           .describe(
-            "The concept/idea to turn into a carousel — summarize from the conversation if the user did not paste it verbatim",
+            "Core concept — summarize from recent chat if the user did not paste it verbatim. Be specific.",
           ),
         name: z
           .string()
           .optional()
-          .describe("Short carousel title (defaults to a slice of the idea)"),
+          .describe("Short deck title ≤ 8 words"),
+        audience: z
+          .string()
+          .optional()
+          .describe("Who this is for, e.g. Series A growth leads"),
+        platform: z
+          .enum(["linkedin", "instagram", "tiktok", "threads"])
+          .optional()
+          .describe("Target platform; default linkedin"),
+        tone: z
+          .string()
+          .optional()
+          .describe("Voice, e.g. direct operator-to-operator"),
+        cta: z
+          .string()
+          .optional()
+          .describe("Final-slide call to action"),
         aspectRatio: z
           .enum(["1:1", "4:5", "9:16"])
           .optional()
           .describe("Slide aspect ratio; default 4:5"),
+        slideCount: z
+          .number()
+          .int()
+          .min(4)
+          .max(8)
+          .optional()
+          .describe("How many slides to generate if slides omitted (default 5)"),
         slides: z
           .array(
             z.object({
-              title: z.string().describe("Bold slide headline"),
-              subtitle: z.string().describe("Supporting line"),
+              role: z
+                .enum(["hook", "problem", "insight", "proof", "howto", "cta"])
+                .optional()
+                .describe("Narrative role of this slide"),
+              eyebrow: z
+                .string()
+                .optional()
+                .describe("Tiny label above title, e.g. PROBLEM"),
+              title: z
+                .string()
+                .describe("Punchy headline ≤ 10 words, scannable"),
+              subtitle: z
+                .string()
+                .describe("Concrete supporting line ≤ 22 words — not generic filler"),
             }),
           )
-          .min(2)
+          .min(4)
           .max(8)
           .optional()
           .describe(
-            "Optional slide outline grounded in the idea (2–8 slides). If omitted, a 3-slide default is generated from the idea.",
+            "Preferred: full outline you write (4–8 slides). First=hook, last=cta. If omitted, an LLM drafts one from the idea.",
           ),
       }),
-      execute: async ({ idea, name, aspectRatio, slides }) => {
+      execute: async ({
+        idea,
+        name,
+        audience,
+        platform,
+        tone,
+        cta,
+        aspectRatio,
+        slideCount,
+        slides,
+      }) => {
         const item = await deps.queueCarouselFromIdea({
           idea,
           name,
+          audience,
+          platform,
+          tone,
+          cta,
           aspectRatio,
-          slides,
+          slideCount,
+          slides: slides as QueueOpenCarouselOptions["slides"],
         });
         return {
           ok: true,
-          message: `Queued carousel “${item.name}” (${item.slideCount} slides). Open Test to preview or publish to Zernio.`,
+          message: `Queued “${item.name}” (${item.slideCount} slides). Open Test to preview or publish to Zernio.`,
           carouselId: item.id,
           name: item.name,
           aspectRatio: item.aspectRatio,
           slideCount: item.slideCount,
           caption: item.caption,
           status: item.status,
+          outline: (slides ?? []).map((s) => ({
+            role: s.role,
+            title: s.title,
+          })),
         };
       },
     }),

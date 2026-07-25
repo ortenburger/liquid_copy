@@ -86,24 +86,36 @@ export async function exportSlide(
 
   try {
     await page.setViewport({ width, height, deviceScaleFactor: 1 });
-    await page.setContent(fullHtml, { waitUntil: "domcontentloaded", timeout: 15000 });
+    // Avoid networkidle0 — Google Fonts / open connections cause Navigation timeout
+    // and the export API returns 500, which leaves Zernio posts without real media.
+    await page.setContent(fullHtml, {
+      waitUntil: "domcontentloaded",
+      timeout: 15000,
+    });
 
-    // Wait for fonts to be ready
+    // Wait briefly for fonts; don't hard-fail if a webfont hangs.
     await page
       .waitForFunction(
         () =>
           document.fonts.ready.then(() =>
             [...document.fonts].every((f) => f.status === "loaded")
           ),
-        { timeout: 10000 }
+        { timeout: 3000 }
       )
-      .catch(() => {
-        // Font loading timeout — proceed with whatever loaded
-      });
+      .catch(() => undefined);
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    await new Promise((r) => setTimeout(r, 100));
 
     const screenshotBuffer = await page.screenshot({
       type: "png",
       clip: { x: 0, y: 0, width, height },
+      omitBackground: false,
     });
 
     exportCount++;

@@ -211,7 +211,7 @@ export function SettingsPage() {
             navigate("/app", { replace: true });
           }}
           label="Simple UI"
-          description="Reduce navigation to Chat (agent), Testing plan, Test, Analytics, and Settings."
+          description="Reduce navigation to Chat (agent), Testing plan, Test, and Settings."
         />
       </section>
 
@@ -335,9 +335,10 @@ export function SettingsPage() {
           <a href="https://zernio.com" target="_blank" rel="noreferrer">
             Zernio dashboard
           </a>
-          , then paste its account <code>_id</code> here (or leave blank to use
-          the first connected account). Test → Publish creates a real post (or a
-          draft if no account is connected).
+          , then paste its account <code>_id</code> (or leave blank for the first
+          connected account). Test → Publish exports Open Carrusel slide PNGs and
+          publishes as a multi-image carousel (slide PNGs from Open Carrusel).
+          Keep Open Carrusel running so export can render slides.
         </p>
       </section>
 

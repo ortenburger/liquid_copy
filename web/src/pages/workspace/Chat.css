@@ -2,18 +2,6 @@
   gap: var(--space-md);
 }
 
-.chat-layout {
-  display: grid;
-  gap: var(--space-md);
-}
-
-@media (min-width: 1100px) {
-  .chat-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-    align-items: start;
-  }
-}
-
 .chat-main {
   display: flex;
   flex-direction: column;
@@ -58,26 +46,13 @@
   color: var(--on-surface-variant);
 }
 
-.chat-bubble-body,
-.chat-tool-out {
+.chat-bubble-body {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
   font: var(--text-body);
   color: var(--on-surface);
-}
-
-.chat-tool-out {
-  font: var(--text-label-mono);
-  letter-spacing: 0.02em;
-  color: var(--on-surface-variant);
-  max-height: 160px;
-  overflow: auto;
-}
-
-.chat-quick {
-  margin: 0;
 }
 
 .chat-composer {
@@ -88,29 +63,4 @@
 .chat-composer-actions {
   display: flex;
   justify-content: flex-end;
-}
-
-.chat-side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-md);
-}
-
-.org-scope-chip {
-  display: inline-block;
-  border: 1px solid var(--outline-hairline);
-  background: transparent;
-  color: var(--on-surface-variant);
-  border-radius: var(--radius);
-  padding: 6px 10px;
-  font: var(--text-label-mono);
-  letter-spacing: 0.03em;
-  cursor: pointer;
-  text-decoration: none;
-}
-
-.org-scope-chip.is-active {
-  border-color: var(--accent);
-  color: var(--on-surface);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }

@@ -51,14 +51,25 @@ export function wrapSlideHtml(
     // For export: use inlined base64 @font-face CSS
     fontBlock = `<style>${options.inlineFontCss}</style>`;
   } else if (fontFamilies.length > 0) {
-    // For preview: use Google Fonts CDN link
-    const params = fontFamilies
-      .map(
-        (f) =>
-          `family=${encodeURIComponent(f)}:wght@300;400;500;600;700;800`
-      )
-      .join("&");
-    fontBlock = `<link href="https://fonts.googleapis.com/css2?${params}&display=swap" rel="stylesheet">`;
+    // Skip system / local stacks — loading "Geist" etc. from Google Fonts hangs Puppeteer export.
+    const skip = new Set([
+      "geist",
+      "ui-sans-serif",
+      "segoe ui",
+      "helvetica",
+      "arial",
+      "sans-serif",
+    ]);
+    const remote = fontFamilies.filter((f) => !skip.has(f.toLowerCase()));
+    if (remote.length > 0) {
+      const params = remote
+        .map(
+          (f) =>
+            `family=${encodeURIComponent(f)}:wght@300;400;500;600;700;800`
+        )
+        .join("&");
+      fontBlock = `<link href="https://fonts.googleapis.com/css2?${params}&display=swap" rel="stylesheet">`;
+    }
   }
 
   return `<!DOCTYPE html>

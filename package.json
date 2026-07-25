@@ -7,7 +7,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "api:dev": "vite-node --config vitest.config.ts src/server/local-api.ts",
+    "api:dev": "vite-node --watch --config vitest.config.ts src/server/local-api.ts",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "carousel:dev": "npm --prefix open-carrusel run dev",
@@ -20,5 +20,9 @@
     "typescript": "^5.8.2",
     "vite-node": "^3.2.4",
     "vitest": "^3.0.9"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "pdf-lib": "^1.17.1"
   }
 }

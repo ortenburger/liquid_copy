@@ -176,17 +176,18 @@ export function TestPage() {
       </header>
 
       <p className="page-lead">
-        Queue an Open Carrusel deck, preview it with the studio cards, then
-        publish to Zernio. Configure keys under{" "}
+        Queue an Open Carrusel deck, preview slides, then publish to Zernio as a
+        multi-image carousel (exported slide PNGs). Needs Open Carrusel running
+        and Zernio keys under{" "}
         <Link to="/app/settings">Settings</Link>
         {!simulation ? (
           <>
             {" "}
-            · studio at{" "}
+            · studio{" "}
             <code>{loadSettings().openCarouselBaseUrl || "http://localhost:3000"}</code>
           </>
         ) : null}
-        .
+        . First publish can take a minute while slides render.
       </p>
 
       <section className="panel">

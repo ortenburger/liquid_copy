@@ -261,21 +261,8 @@ const server = createServer((req, res) => {
   })();
 });
 
-server.on("error", (err: NodeJS.ErrnoException) => {
-  if (err.code === "EADDRINUSE") {
-    console.error(
-      `[liquid-copy-api] port ${PORT} is already in use. Set PORT=… or free the port.`,
-    );
-  } else {
-    console.error("[liquid-copy-api]", err);
-  }
-  process.exit(1);
-});
-
-server.listen(PORT, HOST, () => {
-  console.log(
-    `[liquid-copy-api] listening on http://${HOST}:${PORT}`,
-  );
+function onListening(): void {
+  console.log(`[liquid-copy-api] listening on http://${HOST}:${PORT}`);
   console.log(
     `[liquid-copy-api] health → http://${HOST}:${PORT}/api/content-creator-ai/health`,
   );
@@ -289,5 +276,40 @@ server.listen(PORT, HOST, () => {
       "[liquid-copy-api] LLM_BASE_URL unset — heuristics until Settings syncs LLM config",
     );
   }
+}
 
-});
+function listenWithRetry(attempt = 0): void {
+  const onError = (err: NodeJS.ErrnoException) => {
+    server.off("listening", onListening);
+    if (err.code === "EADDRINUSE" && attempt < 20) {
+      // vite-node --watch can restart before the previous listener releases the port
+      setTimeout(() => listenWithRetry(attempt + 1), 150);
+      return;
+    }
+    if (err.code === "EADDRINUSE") {
+      console.error(
+        `[liquid-copy-api] port ${PORT} is already in use. Set PORT=… or free the port.`,
+      );
+    } else {
+      console.error("[liquid-copy-api]", err);
+    }
+    process.exit(1);
+  };
+  server.once("error", onError);
+  server.once("listening", () => {
+    server.off("error", onError);
+    onListening();
+  });
+  server.listen(PORT, HOST);
+}
+
+function shutdown(signal: string): void {
+  console.log(`[liquid-copy-api] ${signal} — closing`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+
+process.once("SIGTERM", () => shutdown("SIGTERM"));
+process.once("SIGINT", () => shutdown("SIGINT"));
+
+listenWithRetry();

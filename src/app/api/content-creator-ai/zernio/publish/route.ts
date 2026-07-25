@@ -19,6 +19,7 @@ interface Body {
   aspectRatio?: string;
   slideCount?: number;
   slideTexts?: string[];
+  openCarouselBaseUrl?: string;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -44,8 +45,13 @@ export async function POST(request: Request): Promise<Response> {
       aspectRatio: body.aspectRatio,
       slideCount: body.slideCount,
       slideTexts: Array.isArray(body.slideTexts) ? body.slideTexts : undefined,
+      openCarouselBaseUrl:
+        body.openCarouselBaseUrl?.trim() ||
+        process.env.OPENCAROUSEL_BASE_URL ||
+        undefined,
     });
-    return jsonResponse(result, result.ok ? 200 : 400);
+    // Always 200 with ok flag so the UI can show detailed carousel export/upload errors.
+    return jsonResponse(result, 200);
   } catch (err) {
     return errorResponse(
       err instanceof Error ? err.message : "Zernio publish failed",
