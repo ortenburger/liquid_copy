@@ -79,6 +79,11 @@ class DemoStore {
   checkpoints: CheckpointRecord[] = initialCheckpoints();
   platforms: SocialPlatform[] = ["instagram", "linkedin", "tiktok"];
   experiments: ExperimentCard[] = [...DEMO_EXPERIMENTS];
+  private roadmap: RoadmapSummary = structuredClone(DEMO_ROADMAP);
+  private hypotheses: HypothesisCard[] = structuredClone(DEMO_HYPOTHESES);
+  private kbEntities: KBEntitySummary[] = DEMO_KB_ENTITIES.map((e) => ({ ...e }));
+  private kbMarkdown: Record<string, string> = { ...DEMO_KB_MARKDOWN };
+  private passages: RAGPassage[] = DEMO_PASSAGES.map((p) => ({ ...p }));
   private listeners = new Set<() => void>();
   /** Cached for useSyncExternalStore — must be referentially stable until notify(). */
   private cachedStatus: WorkflowStatus | null = null;
@@ -205,11 +210,11 @@ class DemoStore {
   }
 
   getRoadmapSummary(): RoadmapSummary {
-    return DEMO_ROADMAP;
+    return structuredClone(this.roadmap);
   }
 
   getHypotheses(): HypothesisCard[] {
-    return [...DEMO_HYPOTHESES];
+    return structuredClone(this.hypotheses);
   }
 
   getPlanHistory(): PlanChangeRecord[] {
@@ -238,11 +243,60 @@ class DemoStore {
   }
 
   /** Reset roadmap + hypotheses to waiting review (Simple UI kickstart). */
-  kickstartPlan(): WorkflowStatus {
+  kickstartPlan(focus?: string): WorkflowStatus {
+    this.roadmap = structuredClone(DEMO_ROADMAP);
+    this.hypotheses = structuredClone(DEMO_HYPOTHESES);
+    if (focus?.trim()) {
+      this.roadmap = {
+        ...this.roadmap,
+        summary: `${this.roadmap.summary}\n\nFocus: ${focus.trim()}`,
+      };
+    }
     this.stages = initialStages();
     this.checkpoints = initialCheckpoints();
+    const roadmapCp = this.checkpoints.find((c) => c.stage === "RoadmapReview");
+    const hypCp = this.checkpoints.find((c) => c.stage === "HypothesisReview");
+    if (roadmapCp) {
+      roadmapCp.status = "waiting";
+      roadmapCp.pendingOutput = JSON.stringify(this.roadmap, null, 2);
+    }
+    if (hypCp) {
+      hypCp.status = "waiting";
+      hypCp.pendingOutput = JSON.stringify(this.hypotheses.slice(0, 2), null, 2);
+    }
     this.notify();
     return this.status();
+  }
+
+  /** Patch roadmap and/or hypotheses (agent update_testing_plan). */
+  updateTestingPlan(input: {
+    roadmap?: RoadmapSummary;
+    hypotheses?: HypothesisCard[];
+  }): {
+    roadmap: RoadmapSummary;
+    hypotheses: HypothesisCard[];
+  } {
+    if (input.roadmap) {
+      this.roadmap = structuredClone(input.roadmap);
+      const roadmapCp = this.checkpoints.find((c) => c.stage === "RoadmapReview");
+      if (roadmapCp) {
+        roadmapCp.status = "waiting";
+        roadmapCp.pendingOutput = JSON.stringify(this.roadmap, null, 2);
+      }
+    }
+    if (input.hypotheses) {
+      this.hypotheses = structuredClone(input.hypotheses);
+      const hypCp = this.checkpoints.find((c) => c.stage === "HypothesisReview");
+      if (hypCp) {
+        hypCp.status = "waiting";
+        hypCp.pendingOutput = JSON.stringify(this.hypotheses, null, 2);
+      }
+    }
+    this.notify();
+    return {
+      roadmap: this.getRoadmapSummary(),
+      hypotheses: this.getHypotheses(),
+    };
   }
 
   getOrgProfile(): OrgProfile {
@@ -257,12 +311,12 @@ class DemoStore {
   }
 
   listKBEntities(): KBEntitySummary[] {
-    return DEMO_KB_ENTITIES.map((e) => ({ ...e }));
+    return this.kbEntities.map((e) => ({ ...e }));
   }
 
   readKBEntity(entityId: string): KBDocumentView {
-    const meta = DEMO_KB_ENTITIES.find((e) => e.entityId === entityId);
-    const markdown = DEMO_KB_MARKDOWN[entityId];
+    const meta = this.kbEntities.find((e) => e.entityId === entityId);
+    const markdown = this.kbMarkdown[entityId];
     if (!markdown) return { entityId, found: false };
     return {
       entityId,
@@ -274,6 +328,62 @@ class DemoStore {
     };
   }
 
+  /**
+   * Simulation write — new KB version + synthetic RAG passage for search.
+   */
+  writeKBEntity(input: {
+    entityId: string;
+    entityType: KBEntitySummary["entityType"];
+    markdown: string;
+    append?: boolean;
+  }): { entityId: string; versionNumber: number; scope: RetrievalScope } {
+    const entityId = input.entityId.trim();
+    const existing = this.kbMarkdown[entityId];
+    const markdown =
+      input.append && existing
+        ? `${existing.trim()}\n\n---\n\n${input.markdown.trim()}`
+        : input.markdown.trim();
+    const prev = this.kbEntities.find((e) => e.entityId === entityId);
+    const versionNumber = (prev?.latestVersion ?? 0) + 1;
+    const updatedAt = new Date().toISOString();
+    const next: KBEntitySummary = {
+      entityId,
+      entityType: input.entityType,
+      latestVersion: versionNumber,
+      updatedAt,
+    };
+    this.kbEntities = [
+      ...this.kbEntities.filter((e) => e.entityId !== entityId),
+      next,
+    ];
+    this.kbMarkdown[entityId] = markdown;
+
+    const scope: RetrievalScope =
+      input.entityType === "product"
+        ? "product_context"
+        : input.entityType === "audience"
+          ? "audience_learning"
+          : input.entityType === "experiment"
+            ? "experiment_history"
+            : "company_memory";
+
+    const clip =
+      markdown.length > 400 ? `${markdown.slice(0, 400)}…` : markdown;
+    this.passages = [
+      {
+        content: clip,
+        scope,
+        sourceDoc: `${entityId}_v${versionNumber}`,
+        similarityScore: 0.99,
+      },
+      ...this.passages.filter(
+        (p) => !p.sourceDoc.startsWith(`${entityId}_v`),
+      ),
+    ];
+    this.notify();
+    return { entityId, versionNumber, scope };
+  }
+
   getAnalytics(): AnalyticsSummary {
     return {
       ...DEMO_ANALYTICS,
@@ -283,15 +393,16 @@ class DemoStore {
 
   searchScoped(query: string, scope?: RetrievalScope, limit = 10): RAGPassage[] {
     const q = query.trim().toLowerCase();
-    return DEMO_PASSAGES.filter((p) => {
-      if (scope && p.scope !== scope) return false;
-      if (!q) return true;
-      return (
-        p.content.toLowerCase().includes(q) ||
-        p.scope.toLowerCase().includes(q) ||
-        p.sourceDoc.toLowerCase().includes(q)
-      );
-    })
+    return this.passages
+      .filter((p) => {
+        if (scope && p.scope !== scope) return false;
+        if (!q) return true;
+        return (
+          p.content.toLowerCase().includes(q) ||
+          p.scope.toLowerCase().includes(q) ||
+          p.sourceDoc.toLowerCase().includes(q)
+        );
+      })
       .slice(0, Math.min(limit, 10))
       .sort((a, b) => b.similarityScore - a.similarityScore);
   }

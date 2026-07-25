@@ -17,7 +17,6 @@
   border-radius: var(--radius-lg);
   background: var(--surface-container-lowest);
   color: inherit;
-  cursor: pointer;
   transition:
     border-color var(--duration-fast) var(--ease-spring),
     box-shadow var(--duration-fast) var(--ease-spring),
@@ -28,6 +27,20 @@
   border-color: color-mix(in srgb, var(--primary) 45%, var(--outline-hairline));
   box-shadow: var(--shadow-float);
   transform: translateY(-2px);
+}
+
+.oc-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .oc-card-preview {
@@ -71,4 +84,18 @@
   font: var(--text-label-mono);
   letter-spacing: 0.03em;
   color: var(--on-surface-variant);
+}
+
+.oc-card-note {
+  margin: 0;
+  font: var(--text-body-sm, 0.8rem/1.4 var(--font-sans));
+  color: var(--on-surface-variant);
+}
+
+.oc-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--outline-hairline);
 }

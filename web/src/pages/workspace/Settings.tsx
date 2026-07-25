@@ -211,7 +211,7 @@ export function SettingsPage() {
             navigate("/app", { replace: true });
           }}
           label="Simple UI"
-          description="Reduce navigation to Chat (agent), Organization, Testing plan, Analytics, and Settings."
+          description="Reduce navigation to Chat (agent), Testing plan, Test, Analytics, and Settings."
         />
       </section>
 
@@ -299,7 +299,7 @@ export function SettingsPage() {
       <section className="panel settings-panel">
         <div className="panel-head">
           <h2 className="panel-title">Zernio</h2>
-          <span className="panel-meta">Analytics &amp; experiments</span>
+          <span className="panel-meta">Publish &amp; analytics</span>
         </div>
         <div className="settings-fields">
           <Input
@@ -308,19 +308,36 @@ export function SettingsPage() {
             autoComplete="off"
             value={settings.zernioApiKey}
             onChange={(e) => patch({ zernioApiKey: e.target.value })}
-            placeholder="zn-…"
+            placeholder="sk_…"
           />
           <Input
             label="Zernio API base URL"
             value={settings.zernioApiBaseUrl}
             onChange={(e) => patch({ zernioApiBaseUrl: e.target.value })}
-            placeholder="https://api.zernio.com"
+            placeholder="https://zernio.com/api/v1"
+          />
+          <Input
+            label="Preferred platform"
+            value={settings.zernioPlatform}
+            onChange={(e) => patch({ zernioPlatform: e.target.value })}
+            placeholder="linkedin"
+          />
+          <Input
+            label="Account ID (optional)"
+            value={settings.zernioAccountId}
+            onChange={(e) => patch({ zernioAccountId: e.target.value })}
+            placeholder="From GET /v1/accounts → _id"
           />
         </div>
         <p className="settings-note">
-          Used by Analytics Agent to poll post metrics after the observation
-          window. Synced to the local API as <code>ZERNIO_API_KEY</code> /{" "}
-          <code>ZERNIO_API_BASE</code> when you Save in real-data mode.
+          Base must be <code>https://zernio.com/api/v1</code>. Connect a social
+          account in the{" "}
+          <a href="https://zernio.com" target="_blank" rel="noreferrer">
+            Zernio dashboard
+          </a>
+          , then paste its account <code>_id</code> here (or leave blank to use
+          the first connected account). Test → Publish creates a real post (or a
+          draft if no account is connected).
         </p>
       </section>
 

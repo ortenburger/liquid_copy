@@ -19,8 +19,8 @@ export const FULL_NAV: NavItem[] = [
 /** Chat is home; agent owns the loop (RAG, MD, analytics tools). */
 export const SIMPLE_NAV: NavItem[] = [
   { to: "/app", end: true, label: "Chat" },
-  { to: "/app/organization", label: "Organization" },
   { to: "/app/testing-plan", label: "Testing plan" },
+  { to: "/app/test", label: "Test" },
   { to: "/app/analytics", label: "Analytics" },
   { to: "/app/settings", label: "Settings", icon: "gear" },
 ];
@@ -34,8 +34,8 @@ export const FULL_ONLY_PREFIXES = [
 ] as const;
 
 export const SIMPLE_ONLY_PREFIXES = [
-  "/app/organization",
   "/app/testing-plan",
+  "/app/test",
   "/app/analytics",
 ] as const;
 

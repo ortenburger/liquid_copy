@@ -116,6 +116,10 @@ export interface RuntimeConfigInput {
   firecrawlApiKey?: string;
   zernioApiKey?: string;
   zernioApiBaseUrl?: string;
+  /** Optional connected social account _id from GET /v1/accounts. */
+  zernioAccountId?: string;
+  /** Preferred platform slug (linkedin, instagram, twitter, …). */
+  zernioPlatform?: string;
   openCarouselBaseUrl?: string;
   /** Last company URL ingested on Knowledge — used for Open Carrusel websiteUrl. */
   lastFirecrawlUrl?: string;
@@ -154,13 +158,29 @@ export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
   }
 
   if (typeof input.zernioApiBaseUrl === "string" && input.zernioApiBaseUrl.trim()) {
-    if (
-      assignEnv(
-        "ZERNIO_API_BASE",
-        input.zernioApiBaseUrl.trim().replace(/\/$/, ""),
-      )
-    ) {
+    // Lazy import avoided — normalize inline for legacy api.zernio.com defaults
+    let base = input.zernioApiBaseUrl.trim().replace(/\/$/, "");
+    if (!base || base === "https://api.zernio.com" || base === "http://api.zernio.com") {
+      base = "https://zernio.com/api/v1";
+    } else if (base === "https://zernio.com" || base === "https://www.zernio.com") {
+      base = "https://zernio.com/api/v1";
+    } else if (base.endsWith("/api")) {
+      base = `${base}/v1`;
+    }
+    if (assignEnv("ZERNIO_API_BASE", base)) {
       applied.push("zernioApiBaseUrl");
+    }
+  }
+
+  if (typeof input.zernioAccountId === "string") {
+    if (assignEnv("ZERNIO_ACCOUNT_ID", input.zernioAccountId.trim())) {
+      applied.push("zernioAccountId");
+    }
+  }
+
+  if (typeof input.zernioPlatform === "string") {
+    if (assignEnv("ZERNIO_PLATFORM", input.zernioPlatform.trim())) {
+      applied.push("zernioPlatform");
     }
   }
 
@@ -265,6 +285,10 @@ export function applyRequestSecrets(headers: Headers): void {
     headers.get("x-zernio-api-key") ?? headers.get("X-Zernio-Api-Key");
   const zernioBase =
     headers.get("x-zernio-api-base") ?? headers.get("X-Zernio-Api-Base");
+  const zernioAccountId =
+    headers.get("x-zernio-account-id") ?? headers.get("X-Zernio-Account-Id");
+  const zernioPlatform =
+    headers.get("x-zernio-platform") ?? headers.get("X-Zernio-Platform");
   const openCarousel =
     headers.get("x-open-carousel-base-url") ??
     headers.get("X-Open-Carousel-Base-Url");
@@ -286,6 +310,8 @@ export function applyRequestSecrets(headers: Headers): void {
     !firecrawl &&
     !zernioKey &&
     !zernioBase &&
+    !zernioAccountId &&
+    !zernioPlatform &&
     !openCarousel &&
     !lastFirecrawl &&
     !baseUrl &&
@@ -302,6 +328,8 @@ export function applyRequestSecrets(headers: Headers): void {
     firecrawlApiKey: firecrawl ?? undefined,
     zernioApiKey: zernioKey ?? undefined,
     zernioApiBaseUrl: zernioBase ?? undefined,
+    zernioAccountId: zernioAccountId ?? undefined,
+    zernioPlatform: zernioPlatform ?? undefined,
     openCarouselBaseUrl: openCarousel ?? undefined,
     lastFirecrawlUrl: lastFirecrawl ?? undefined,
     llm:

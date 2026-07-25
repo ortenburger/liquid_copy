@@ -34,8 +34,12 @@ export interface AppSettings {
   lastFirecrawlUrl: string;
   /** Zernio analytics API key (Bearer). */
   zernioApiKey: string;
-  /** Zernio API origin (no trailing slash). */
+  /** Zernio API root (no trailing slash). Docs: https://zernio.com/api/v1 */
   zernioApiBaseUrl: string;
+  /** Optional connected account _id from GET /v1/accounts. */
+  zernioAccountId: string;
+  /** Preferred platform slug (linkedin, instagram, twitter, …). */
+  zernioPlatform: string;
   openCarouselBaseUrl: string;
   llm: LLMSettings;
 }
@@ -111,10 +115,32 @@ export function defaultSettings(): AppSettings {
     firecrawlApiKey: "",
     lastFirecrawlUrl: "https://",
     zernioApiKey: "",
-    zernioApiBaseUrl: "https://api.zernio.com",
+    zernioApiBaseUrl: "https://zernio.com/api/v1",
+    zernioAccountId: "",
+    zernioPlatform: "linkedin",
     openCarouselBaseUrl: "http://localhost:3000",
     llm: defaultLLMSettings("ollama"),
   };
+}
+
+/** Map legacy / shorthand bases onto the documented Zernio API root. */
+export function normalizeZernioApiBaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/$/, "");
+  if (
+    !trimmed ||
+    trimmed === "https://api.zernio.com" ||
+    trimmed === "http://api.zernio.com"
+  ) {
+    return "https://zernio.com/api/v1";
+  }
+  if (
+    trimmed === "https://zernio.com" ||
+    trimmed === "https://www.zernio.com"
+  ) {
+    return "https://zernio.com/api/v1";
+  }
+  if (trimmed.endsWith("/api")) return `${trimmed}/v1`;
+  return trimmed;
 }
 
 function parseLLM(raw: Partial<LLMSettings> | undefined): LLMSettings {
@@ -155,9 +181,11 @@ export function loadSettings(): AppSettings {
           parsed.lastFirecrawlUrl ?? base.lastFirecrawlUrl,
         ),
         zernioApiKey: String(parsed.zernioApiKey ?? ""),
-        zernioApiBaseUrl: String(
-          parsed.zernioApiBaseUrl ?? base.zernioApiBaseUrl,
-        ).replace(/\/$/, ""),
+        zernioApiBaseUrl: normalizeZernioApiBaseUrl(
+          String(parsed.zernioApiBaseUrl ?? base.zernioApiBaseUrl),
+        ),
+        zernioAccountId: String(parsed.zernioAccountId ?? ""),
+        zernioPlatform: String(parsed.zernioPlatform ?? base.zernioPlatform),
         openCarouselBaseUrl: String(
           parsed.openCarouselBaseUrl ?? base.openCarouselBaseUrl,
         ).replace(/\/$/, ""),
@@ -185,7 +213,9 @@ export function saveSettings(settings: AppSettings): void {
     ...settings,
     apiBaseUrl: settings.apiBaseUrl.replace(/\/$/, ""),
     openCarouselBaseUrl: settings.openCarouselBaseUrl.replace(/\/$/, ""),
-    zernioApiBaseUrl: settings.zernioApiBaseUrl.replace(/\/$/, ""),
+    zernioApiBaseUrl: normalizeZernioApiBaseUrl(settings.zernioApiBaseUrl),
+    zernioAccountId: settings.zernioAccountId.trim(),
+    zernioPlatform: settings.zernioPlatform.trim(),
     llm: {
       ...settings.llm,
       baseUrl: settings.llm.baseUrl.replace(/\/$/, ""),
@@ -206,6 +236,18 @@ export function isDemoWorkspace(): boolean {
   return loadSettings().dataMode !== "real";
 }
 
+function isLocalLiquidApi(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (
+      (u.hostname === "localhost" || u.hostname === "127.0.0.1") &&
+      (u.port === "8787" || u.port === "")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function getApiBaseUrl(): string | undefined {
   const settings = loadSettings();
   if (settings.dataMode !== "real") return undefined;
@@ -213,5 +255,14 @@ export function getApiBaseUrl(): string | undefined {
     settings.apiBaseUrl.trim() ||
     (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
     DEFAULT_API_BASE_URL;
-  return url.replace(/\/$/, "") || DEFAULT_API_BASE_URL;
+  const normalized = url.replace(/\/$/, "") || DEFAULT_API_BASE_URL;
+  // In Vite dev, prefer same-origin proxy to avoid CORS "Failed to fetch".
+  if (
+    typeof window !== "undefined" &&
+    import.meta.env.DEV &&
+    isLocalLiquidApi(normalized)
+  ) {
+    return "/__liquid-api";
+  }
+  return normalized;
 }

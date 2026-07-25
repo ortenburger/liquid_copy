@@ -14,7 +14,6 @@ import { useDataMode } from "../../lib/hooks";
 import { loadSettings } from "../../lib/settings";
 import type { RAGPassage } from "../../lib/types";
 import "./workspace.css";
-import "./Organization.css";
 import "./Chat.css";
 import "../../components/ui/Input.css";
 
@@ -28,11 +27,11 @@ function msg(role: ChatMessage["role"], content: string): ChatMessage {
 
 const QUICK_PROMPTS = [
   "What's in our knowledge base?",
-  "Kickstart a testing plan",
-  "What needs approval?",
+  "Generate a testing plan focused on LinkedIn pain hooks",
+  "Show me the current testing plan",
+  "Queue a carousel about operational-pain hooks for Series A growth leads",
   "How are experiments performing?",
-  "Who is the winning hook?",
-  "What is our brand voice?",
+  "Save to RAG as chat-note: Series A growth leads hate calendar busywork.",
 ];
 
 export function ChatPage() {
@@ -40,7 +39,7 @@ export function ChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     msg(
       "assistant",
-      "I'm the Liquid Copy agent. Ask about org context, KB markdown, plans, or analytics — I'll use RAG + markdown as context, and tools (kickstart, get_analytics).",
+      "I'm the Liquid Copy agent. Ask me to generate/query/update the testing plan, queue a carousel from an idea we discuss, save to RAG, or check analytics.",
     ),
   ]);
   const [input, setInput] = useState("");
@@ -104,9 +103,8 @@ export function ChatPage() {
       </header>
 
       <p className="page-lead">
-        Main workspace. Grounded in RAG + KB markdown + analytics tools. Browse{" "}
-        <Link to="/app/organization">Organization</Link> or{" "}
-        <Link to="/app/analytics">Analytics</Link> — or just ask here.
+        Main workspace. Grounded in RAG + KB markdown + analytics tools. Open{" "}
+        <Link to="/app/analytics">Analytics</Link> or just ask here.
       </p>
 
       {error ? <p className="error-banner">{error}</p> : null}
@@ -156,7 +154,7 @@ export function ChatPage() {
               label="Message"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask the agent… (kickstart plan, read liquid-copy.md, approve roadmap)"
+              placeholder="Ask the agent… (generate plan, queue a carousel about …, save to RAG)"
               rows={3}
               disabled={busy}
             />
@@ -178,8 +176,8 @@ export function ChatPage() {
             </div>
             {tools.length === 0 ? (
               <p className="empty-state">
-                Tools run automatically from your message (kickstart, list KB,
-                analytics…).
+                The model chooses tools via AI SDK (generate/query/update
+                testing plan, save_to_rag, get_analytics…).
               </p>
             ) : (
               <ul className="list-stack">
@@ -211,12 +209,9 @@ export function ChatPage() {
               <ul className="chip-cloud">
                 {mdSources.map((m) => (
                   <li key={m.entityId}>
-                    <Link
-                      className="org-scope-chip is-active"
-                      to="/app/organization"
-                    >
+                    <span className="org-scope-chip is-active">
                       {m.entityId}.md
-                    </Link>
+                    </span>
                   </li>
                 ))}
               </ul>

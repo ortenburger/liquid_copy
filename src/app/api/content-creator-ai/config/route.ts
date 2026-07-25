@@ -12,6 +12,8 @@ interface ConfigBody {
   firecrawlApiKey?: string;
   zernioApiKey?: string;
   zernioApiBaseUrl?: string;
+  zernioAccountId?: string;
+  zernioPlatform?: string;
   openCarouselBaseUrl?: string;
   lastFirecrawlUrl?: string;
   llm?: {
@@ -33,6 +35,8 @@ export async function POST(request: Request): Promise<Response> {
     firecrawlApiKey: body.firecrawlApiKey,
     zernioApiKey: body.zernioApiKey,
     zernioApiBaseUrl: body.zernioApiBaseUrl,
+    zernioAccountId: body.zernioAccountId,
+    zernioPlatform: body.zernioPlatform,
     openCarouselBaseUrl: body.openCarouselBaseUrl,
     lastFirecrawlUrl: body.lastFirecrawlUrl,
     llm: body.llm,

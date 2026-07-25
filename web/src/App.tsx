@@ -9,7 +9,7 @@ import { PlatformsPage } from "./pages/workspace/Platforms";
 import { SettingsPage } from "./pages/workspace/Settings";
 import { CarouselsPage } from "./pages/workspace/Carousels";
 import { TestingPlanPage } from "./pages/workspace/TestingPlan";
-import { OrganizationPage } from "./pages/workspace/Organization";
+import { TestPage } from "./pages/workspace/Test";
 import { ChatPage } from "./pages/workspace/Chat";
 import { AnalyticsPage } from "./pages/workspace/Analytics";
 import { useSimpleUi } from "./lib/hooks";
@@ -32,9 +32,10 @@ export default function App() {
           <Route path="platforms" element={<PlatformsPage />} />
           <Route path="carousels" element={<CarouselsPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="organization" element={<OrganizationPage />} />
           <Route path="testing-plan" element={<TestingPlanPage />} />
+          <Route path="test" element={<TestPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="organization" element={<Navigate to="/app" replace />} />
           <Route path="approvals" element={<Navigate to="/app" replace />} />
           <Route path="insights" element={<Navigate to="/app" replace />} />
         </Route>

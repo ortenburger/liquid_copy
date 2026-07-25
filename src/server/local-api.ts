@@ -29,6 +29,7 @@ import { POST as workflowRunPost } from "@/app/api/content-creator-ai/workflow/r
 import { POST as workflowResetPost } from "@/app/api/content-creator-ai/workflow/reset/route.js";
 import { POST as checkpointPost } from "@/app/api/content-creator-ai/checkpoints/[stage]/[action]/route.js";
 import { POST as searchPost } from "@/app/api/content-creator-ai/search/route.js";
+import { POST as zernioPublishPost } from "@/app/api/content-creator-ai/zernio/publish/route.js";
 import { GET as traceabilityGet } from "@/app/api/content-creator-ai/traceability/[variantId]/route.js";
 import { applyRequestSecrets } from "@/lib/content-creator-ai/api/runtime.js";
 import {
@@ -116,6 +117,7 @@ const routes: Route[] = [
   exact("POST", "/api/content-creator-ai/workflow/run", workflowRunPost),
   exact("POST", "/api/content-creator-ai/workflow/reset", workflowResetPost),
   exact("POST", "/api/content-creator-ai/search", searchPost),
+  exact("POST", "/api/content-creator-ai/zernio/publish", zernioPublishPost),
   pattern(
     "POST",
     "/api/content-creator-ai/checkpoints/[stage]/[action]",
@@ -132,7 +134,7 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-Open-Carousel-Base-Url, X-Last-Firecrawl-Url, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider, X-LLM-Fallback-Api-Key, X-LLM-Fallback-Model",
+    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-Zernio-Account-Id, X-Zernio-Platform, X-Open-Carousel-Base-Url, X-Last-Firecrawl-Url, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider, X-LLM-Fallback-Api-Key, X-LLM-Fallback-Model",
   "Access-Control-Expose-Headers": "Content-Type",
 };
 

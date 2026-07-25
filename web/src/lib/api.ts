@@ -1,5 +1,22 @@
+import { runLiquidCopyAgent } from "./agent/run-agent";
+import type {
+  AgentChatResult,
+  AgentToolEvent,
+  ChatMessage,
+  KBWriteEntityType,
+  RagMarkdownSource,
+  SaveToRagInput,
+} from "./agent/types";
+import { DEMO_QUEUED_CAROUSELS } from "../data/demo";
 import { demoStore } from "./demo-store";
 import { completeWithSettings } from "./llm-browser";
+import { upsertQueuedCarousel } from "./carousel-queue-store";
+import {
+  buildDemoQueuedCarousel,
+  queueOpenCarousel,
+  type OpenCarouselItem,
+  type QueueOpenCarouselOptions,
+} from "./open-carousel";
 import { getApiBaseUrl, isDemoWorkspace, loadSettings } from "./settings";
 import { PLAN_CHECKPOINT_STAGES } from "./simple-ui-nav";
 import type {
@@ -26,11 +43,15 @@ import type {
 } from "./types";
 import { CHECKPOINT_STAGES, WORKFLOW_STAGES } from "./types";
 
-export interface RagMarkdownSource {
-  entityId: string;
-  entityType?: string;
-  markdown: string;
-}
+export type {
+  AgentChatResult,
+  AgentToolEvent,
+  ChatMessage,
+  ChatRole,
+  KBWriteEntityType,
+  RagMarkdownSource,
+  SaveToRagInput,
+} from "./agent/types";
 
 export interface RagAskResult {
   answer: string;
@@ -39,30 +60,6 @@ export interface RagAskResult {
   model: string;
   provider: string;
   usedRagContext: boolean;
-}
-
-export type ChatRole = "user" | "assistant" | "system" | "tool";
-
-export interface ChatMessage {
-  id: string;
-  role: ChatRole;
-  content: string;
-  at: string;
-}
-
-export interface AgentToolEvent {
-  name: string;
-  input?: string;
-  output: string;
-}
-
-export interface AgentChatResult {
-  reply: string;
-  passages: RAGPassage[];
-  markdownSources: RagMarkdownSource[];
-  tools: AgentToolEvent[];
-  model: string;
-  provider: string;
 }
 
 const SCOPE_TO_ENTITY_TYPE: Record<RetrievalScope, KBEntitySummary["entityType"]> =
@@ -74,6 +71,118 @@ const SCOPE_TO_ENTITY_TYPE: Record<RetrievalScope, KBEntitySummary["entityType"]
   };
 
 const MAX_MD_CHARS = 10_000;
+
+function guessEntityType(entityId: string): KBWriteEntityType {
+  const id = entityId.toLowerCase();
+  if (id.startsWith("product") || id.includes("product")) return "product";
+  if (
+    id.startsWith("persona") ||
+    id.startsWith("audience") ||
+    id.includes("persona")
+  ) {
+    return "audience";
+  }
+  if (id.startsWith("experiment") || id.includes("experiment")) {
+    return "experiment";
+  }
+  return "company_identity";
+}
+
+function slugifyEntityId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\.md$/i, "")
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+/**
+ * Parse "save to RAG / remember this" intents from a user message.
+ * Formats:
+ * - Save to RAG as notes-foo: markdown…
+ * - Save to knowledge base (product-liquid-os):\n…
+ * - Remember this:\n…
+ * - save_to_rag entityId|entityType|markdown
+ */
+export function parseSaveToRagIntent(message: string): SaveToRagInput | null {
+  const text = message.trim();
+  if (!text) return null;
+
+  const pipe = text.match(
+    /^save_to_rag\s+([^|\n]+)\|([^|\n]+)\|([\s\S]+)$/i,
+  );
+  if (pipe) {
+    const entityId = slugifyEntityId(pipe[1]);
+    const typeRaw = pipe[2].trim().toLowerCase();
+    const entityType: KBWriteEntityType =
+      typeRaw === "product" ||
+      typeRaw === "audience" ||
+      typeRaw === "experiment" ||
+      typeRaw === "company_identity"
+        ? typeRaw
+        : guessEntityType(entityId);
+    return {
+      entityId: entityId || "chat-note",
+      entityType,
+      markdown: pipe[3].trim(),
+      append: false,
+    };
+  }
+
+  const saveAs = text.match(
+    /\b(?:save|store|write)\s+(?:this\s+)?(?:to\s+)?(?:the\s+)?(?:rag|kb|knowledge(?:\s*base)?)\s+(?:as|under|to)\s+[`"]?([a-z0-9._-]+)[`"]?\s*:?\s*([\s\S]+)/i,
+  );
+  if (saveAs?.[2]?.trim()) {
+    const entityId = slugifyEntityId(saveAs[1]) || "chat-note";
+    return {
+      entityId,
+      entityType: guessEntityType(entityId),
+      markdown: saveAs[2].trim(),
+      append: /\bappend\b/i.test(text),
+    };
+  }
+
+  const saveParen = text.match(
+    /\b(?:save|store|write)\s+(?:this\s+)?(?:to\s+)?(?:the\s+)?(?:rag|kb|knowledge(?:\s*base)?)\s*\(\s*([a-z0-9._-]+)\s*\)\s*:?\s*([\s\S]+)/i,
+  );
+  if (saveParen?.[2]?.trim()) {
+    const entityId = slugifyEntityId(saveParen[1]) || "chat-note";
+    return {
+      entityId,
+      entityType: guessEntityType(entityId),
+      markdown: saveParen[2].trim(),
+      append: /\bappend\b/i.test(text),
+    };
+  }
+
+  const saveColon = text.match(
+    /\b(?:save|store|write)\s+(?:this\s+)?(?:to\s+)?(?:the\s+)?(?:rag|kb|knowledge(?:\s*base)?)\s*:?\s*([\s\S]+)/i,
+  );
+  if (saveColon?.[1]?.trim()) {
+    return {
+      entityId: "chat-note",
+      entityType: "company_identity",
+      markdown: saveColon[1].trim(),
+      append: /\bappend\b/i.test(text),
+    };
+  }
+
+  const remember = text.match(
+    /\bremember\s+(?:this|that)\s*(?:for\s+(?:the\s+)?(?:rag|kb|knowledge))?\s*:?\s*([\s\S]+)/i,
+  );
+  if (remember?.[1]?.trim()) {
+    return {
+      entityId: "chat-note",
+      entityType: "company_identity",
+      markdown: remember[1].trim(),
+      append: true,
+    };
+  }
+
+  return null;
+}
 
 function guessEntityIdsFromPassage(sourceDoc: string): string[] {
   const ids = new Set<string>();
@@ -151,6 +260,12 @@ function authHeaders(): HeadersInit {
   if (s.zernioApiBaseUrl.trim()) {
     headers["X-Zernio-Api-Base"] = s.zernioApiBaseUrl.trim();
   }
+  if (s.zernioAccountId.trim()) {
+    headers["X-Zernio-Account-Id"] = s.zernioAccountId.trim();
+  }
+  if (s.zernioPlatform.trim()) {
+    headers["X-Zernio-Platform"] = s.zernioPlatform.trim();
+  }
   if (s.llm.baseUrl.trim()) headers["X-LLM-Base-Url"] = s.llm.baseUrl.trim();
   if (s.llm.model.trim()) headers["X-LLM-Model"] = s.llm.model.trim();
   if (s.llm.apiKey.trim()) headers["X-LLM-Api-Key"] = s.llm.apiKey.trim();
@@ -187,10 +302,21 @@ async function liveFetch<T>(path: string, init?: RequestInit): Promise<T> {
       headers.set(key, value);
     });
   }
-  const res = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      headers,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+      throw new Error(
+        `Cannot reach Liquid Copy API at ${baseUrl}. Run npm run api:dev (or npm run dev:stack) and confirm Settings → API base URL.`,
+      );
+    }
+    throw e;
+  }
   if (!res.ok) {
     const body = await res.text();
     let message = body || res.statusText;
@@ -359,6 +485,8 @@ export const api = {
         firecrawlApiKey: s.firecrawlApiKey || undefined,
         zernioApiKey: s.zernioApiKey || undefined,
         zernioApiBaseUrl: s.zernioApiBaseUrl || undefined,
+        zernioAccountId: s.zernioAccountId || undefined,
+        zernioPlatform: s.zernioPlatform || undefined,
         openCarouselBaseUrl: s.openCarouselBaseUrl || undefined,
         lastFirecrawlUrl: s.lastFirecrawlUrl || undefined,
         llm: s.llm,
@@ -690,14 +818,53 @@ Answer:`;
                   .join("\n\n"),
         };
       }
+      case "generate_testing_plan":
       case "kickstart_plan": {
-        await this.kickstartPlan();
+        await this.generateTestingPlan(arg || undefined);
+        const plan = await this.getTestingPlan();
         return {
           name,
-          output:
-            "Plan kickstarted. Roadmap/hypotheses are ready — ask Chat to review or approve.",
+          input: arg || undefined,
+          output: JSON.stringify(
+            {
+              message: "Testing plan generated.",
+              roadmap: plan.roadmap ?? plan.roadmapText,
+              hypotheses: plan.hypotheses,
+            },
+            null,
+            2,
+          ),
         };
       }
+      case "update_testing_plan": {
+        const parsed = tryParseJson<{
+          roadmap?: RoadmapSummary;
+          hypotheses?: HypothesisCard[];
+          notes?: string;
+        }>(arg);
+        if (!parsed) {
+          return {
+            name,
+            input: arg,
+            output:
+              "Expected JSON: { roadmap?, hypotheses?, notes? }. Query the plan first, then send updates.",
+          };
+        }
+        const plan = await this.updateTestingPlan(parsed);
+        return {
+          name,
+          output: JSON.stringify(
+            {
+              message: "Testing plan updated.",
+              roadmap: plan.roadmap ?? plan.roadmapText,
+              hypotheses: plan.hypotheses,
+            },
+            null,
+            2,
+          ),
+        };
+      }
+      case "query_testing_plan":
       case "get_testing_plan": {
         const plan = await this.getTestingPlan();
         return {
@@ -706,6 +873,43 @@ Answer:`;
             {
               roadmap: plan.roadmap ?? plan.roadmapText,
               hypotheses: plan.hypotheses,
+            },
+            null,
+            2,
+          ),
+        };
+      }
+      case "queue_carousel": {
+        const parsed = tryParseJson<{
+          idea?: string;
+          name?: string;
+          aspectRatio?: "1:1" | "4:5" | "9:16";
+          slides?: Array<{ title: string; subtitle: string }>;
+        }>(arg);
+        const idea = parsed?.idea?.trim() || arg;
+        if (!idea) {
+          return {
+            name,
+            output:
+              'Provide an idea, e.g. JSON {"idea":"…","slides":[{"title":"…","subtitle":"…"}]}',
+          };
+        }
+        const item = await this.queueCarouselFromIdea({
+          idea,
+          name: parsed?.name,
+          aspectRatio: parsed?.aspectRatio,
+          slides: parsed?.slides,
+        });
+        return {
+          name,
+          input: idea.slice(0, 120),
+          output: JSON.stringify(
+            {
+              ok: true,
+              carouselId: item.id,
+              name: item.name,
+              slideCount: item.slideCount,
+              message: `Queued. Open Test to preview/publish.`,
             },
             null,
             2,
@@ -740,13 +944,48 @@ Answer:`;
           output: JSON.stringify(analytics, null, 2),
         };
       }
+      case "save_to_rag": {
+        const fromJson = tryParseJson<SaveToRagInput>(arg);
+        let parsed =
+          fromJson && fromJson.markdown
+            ? {
+                entityId: slugifyEntityId(fromJson.entityId) || "chat-note",
+                entityType: fromJson.entityType || guessEntityType(fromJson.entityId),
+                markdown: String(fromJson.markdown).trim(),
+                append: Boolean(fromJson.append),
+              }
+            : parseSaveToRagIntent(`save_to_rag ${arg}`) ??
+              parseSaveToRagIntent(arg);
+        if (!parsed?.markdown && arg) {
+          parsed = {
+            entityId: "chat-note",
+            entityType: "company_identity",
+            markdown: arg,
+            append: true,
+          };
+        }
+        if (!parsed?.markdown) {
+          return {
+            name,
+            input: arg,
+            output:
+              "Missing content. Try: Save to RAG as my-note: <markdown to store>",
+          };
+        }
+        const saved = await this.saveToRag(parsed);
+        return {
+          name,
+          input: `${saved.entityId} (${saved.entityType})`,
+          output: `Saved to KB + RAG · ${saved.entityId} v${saved.versionNumber} · ${saved.entityType}${saved.append ? " (appended)" : ""}. Reindexed for retrieval.`,
+        };
+      }
       default:
         return { name, input: arg, output: `Unknown tool: ${name}` };
     }
   },
 
   /**
-   * Main agent chat: RAG + markdown context, optional tools, then Ollama reply.
+   * Main agent chat — Vercel AI SDK ToolLoopAgent (model picks tools).
    */
   async agentChat(
     history: ChatMessage[],
@@ -767,134 +1006,29 @@ Answer:`;
     const passages = [...gathered.passages];
     const markdownSources = [...gathered.markdownSources];
 
-    const tools: AgentToolEvent[] = [];
-    const lower = lastUser.toLowerCase();
-    const toolPlan: Array<{ name: string; input?: string }> = [];
+    const { reply, tools } = await runLiquidCopyAgent({
+      llm,
+      history,
+      passages,
+      markdownSources,
+      deps: {
+        listKBEntities: () => this.listKBEntities(),
+        getKBEntity: (id) => this.getKBEntity(id),
+        search: (q, opts) => this.search(q, opts),
+        generateTestingPlan: (focus) => this.generateTestingPlan(focus),
+        updateTestingPlan: (input) => this.updateTestingPlan(input),
+        getTestingPlan: () => this.getTestingPlan(),
+        queueCarouselFromIdea: (input) => this.queueCarouselFromIdea(input),
+        getWorkflowStatus: () => this.getWorkflowStatus(),
+        checkpointAction: (stage, action) =>
+          this.checkpointAction(stage, action),
+        getAnalytics: () => this.getAnalytics(),
+        saveToRag: (input) => this.saveToRag(input),
+      },
+    });
 
-    if (/\b(kickstart|generate plan|regenerate plan)\b/.test(lower)) {
-      toolPlan.push({ name: "kickstart_plan" });
-    }
-    if (/\b(list (kb|entities|docs|documents)|what(?:'s| is) in the (kb|knowledge))\b/.test(lower)) {
-      toolPlan.push({ name: "list_kb" });
-    }
-    if (/\b(testing plan|hypothes|roadmap)\b/.test(lower)) {
-      toolPlan.push({ name: "get_testing_plan" });
-    }
-    if (/\b(pending approval|approvals? waiting|what needs approval)\b/.test(lower)) {
-      toolPlan.push({ name: "list_pending_approvals" });
-    }
-    if (/\bapprove roadmap\b/.test(lower)) {
-      toolPlan.push({ name: "approve_checkpoint", input: "RoadmapReview" });
-    }
-    if (/\bapprove hypothes/.test(lower)) {
-      toolPlan.push({ name: "approve_checkpoint", input: "HypothesisReview" });
-    }
-    if (/\bapprove content\b/.test(lower)) {
-      toolPlan.push({ name: "approve_checkpoint", input: "ContentReview" });
-    }
-    if (
-      /\b(analytics|metrics|engagement|winner|winning|performance|how (?:are|is) (?:we|experiments?) (?:doing|performing))\b/.test(
-        lower,
-      )
-    ) {
-      toolPlan.push({ name: "get_analytics" });
-      // Prefer experiment history when talking performance.
-      if (!options?.scope) {
-        const enriched = await this.gatherRagMarkdownContext(lastUser, {
-          scope: "experiment_history",
-          limit: 4,
-        });
-        for (const p of enriched.passages) {
-          if (!passages.some((x) => x.content === p.content)) passages.push(p);
-        }
-        for (const m of enriched.markdownSources) {
-          if (!markdownSources.some((x) => x.entityId === m.entityId)) {
-            markdownSources.push(m);
-          }
-        }
-      }
-    }
-    const readMatch = lastUser.match(
-      /\b(?:read|open|show)\s+([a-z0-9._-]+?)(?:\.md)?\b/i,
-    );
-    if (readMatch && !/\banalytics\b/.test(lower)) {
-      toolPlan.push({ name: "read_markdown", input: readMatch[1] });
-    }
-
-    // Deduplicate tools
-    const seen = new Set<string>();
-    for (const t of toolPlan) {
-      const key = `${t.name}:${t.input ?? ""}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      tools.push(await this.runAgentTool(t.name, t.input));
-    }
-
-    const passageBlock =
-      passages.length === 0
-        ? "(none)"
-        : passages
-            .map(
-              (p, i) =>
-                `[${i + 1}] ${p.scope} · ${p.sourceDoc} (${(p.similarityScore * 100).toFixed(0)}%)\n${p.content}`,
-            )
-            .join("\n\n");
-
-    const markdownBlock =
-      markdownSources.length === 0
-        ? "(none)"
-        : markdownSources
-            .map(
-              (m) =>
-                `--- FILE: ${m.entityId}.md (${m.entityType ?? "unknown"}) ---\n${m.markdown}`,
-            )
-            .join("\n\n");
-
-    const toolBlock =
-      tools.length === 0
-        ? "(no tools run)"
-        : tools
-            .map(
-              (t) =>
-                `TOOL ${t.name}${t.input ? ` ${t.input}` : ""}\n${t.output}`,
-            )
-            .join("\n\n");
-
-    const prior = history
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .slice(-8)
-      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-      .join("\n\n");
-
-    const prompt = `You are the Liquid Copy agent. The main UI is this chat. Use RAG passages, KB markdown files, and tool results as ground truth. Be concise and actionable. No hype.
-
-Available tools (already executed when relevant; you may suggest the user ask for them):
-- list_kb
-- read_markdown <entityId>
-- search_rag <query>
-- kickstart_plan
-- get_testing_plan
-- list_pending_approvals
-- approve_checkpoint <StageName>
-- get_analytics (experiment metrics / winners)
-
-Conversation:
-${prior || `USER: ${lastUser}`}
-
-RAG passages:
-${passageBlock}
-
-KB markdown files:
-${markdownBlock}
-
-Tool results:
-${toolBlock}
-
-Respond to the latest user message. If tools already ran, incorporate their results.`;
-
-    const reply = await completeWithSettings(llm, prompt);
     return {
-      reply: reply.trim(),
+      reply,
       passages,
       markdownSources,
       tools,
@@ -968,6 +1102,68 @@ Respond to the latest user message. If tools already ran, incorporate their resu
     });
   },
 
+  /**
+   * Write markdown into the KB. Live mode uses PUT (kb.updated → RAG reindex).
+   * Simulation updates the in-memory demo KB + searchable passages.
+   */
+  async saveToRag(input: SaveToRagInput): Promise<{
+    entityId: string;
+    entityType: KBWriteEntityType;
+    versionNumber: number;
+    append: boolean;
+  }> {
+    const entityId = slugifyEntityId(input.entityId) || "chat-note";
+    const entityType = input.entityType ?? guessEntityType(entityId);
+    let markdown = input.markdown.trim();
+    if (!markdown) throw new Error("Nothing to save — markdown is empty.");
+    if (markdown.length > MAX_MD_CHARS) {
+      markdown = `${markdown.slice(0, MAX_MD_CHARS)}\n\n…(truncated for KB write)`;
+    }
+
+    const append = Boolean(input.append);
+    if (append) {
+      const existing = await this.getKBEntity(entityId);
+      if (existing.found && existing.markdown?.trim()) {
+        markdown = `${existing.markdown.trim()}\n\n---\n\n${markdown}`;
+      }
+    }
+
+    if (useLive()) {
+      await this.syncConfig();
+      const raw = await liveFetch<{
+        versionNumber?: number;
+        kbVersion?: string;
+      }>("/api/content-creator-ai/knowledge-base", {
+        method: "PUT",
+        body: JSON.stringify({
+          entityId,
+          entityType,
+          markdown,
+          modifiedFields: ["markdown"],
+        }),
+      });
+      return {
+        entityId,
+        entityType,
+        versionNumber: raw.versionNumber ?? 1,
+        append,
+      };
+    }
+
+    const saved = demoStore.writeKBEntity({
+      entityId,
+      entityType,
+      markdown,
+      append: false, // already merged above when append
+    });
+    return {
+      entityId: saved.entityId,
+      entityType,
+      versionNumber: saved.versionNumber,
+      append,
+    };
+  },
+
   async ingestCompany(companyUrl: string): Promise<unknown> {
     if (isDemoWorkspace()) {
       throw new Error(
@@ -1011,16 +1207,64 @@ Respond to the latest user message. If tools already ran, incorporate their resu
   },
 
   /**
-   * Kickstart plan generation for Simple UI.
-   * Simulation: reset demo roadmap + hypotheses to waiting.
-   * Real: run the workflow pipeline (context → roadmap → hypotheses).
+   * Generate / regenerate testing plan (roadmap + hypotheses).
+   * Simulation: reset demo plan. Real: run workflow pipeline.
    */
-  async kickstartPlan(): Promise<WorkflowStatus> {
+  async kickstartPlan(focus?: string): Promise<WorkflowStatus> {
     if (useLive()) {
       await this.syncConfig();
       return this.runWorkflow();
     }
-    return demoStore.kickstartPlan();
+    return demoStore.kickstartPlan(focus);
+  },
+
+  /** Alias used by agent tools. */
+  async generateTestingPlan(focus?: string): Promise<WorkflowStatus> {
+    return this.kickstartPlan(focus);
+  },
+
+  /**
+   * Update roadmap and/or hypotheses. Simulation mutates demo store;
+   * live mode edits RoadmapReview / HypothesisReview checkpoints.
+   */
+  async updateTestingPlan(input: {
+    roadmap?: RoadmapSummary;
+    hypotheses?: HypothesisCard[];
+    notes?: string;
+  }): Promise<{
+    roadmap: RoadmapSummary | null;
+    roadmapText: string | null;
+    hypotheses: HypothesisCard[];
+  }> {
+    if (!input.roadmap && !input.hypotheses) {
+      throw new Error("Provide roadmap and/or hypotheses to update.");
+    }
+
+    if (!useLive()) {
+      demoStore.updateTestingPlan({
+        roadmap: input.roadmap,
+        hypotheses: input.hypotheses,
+      });
+      return this.getTestingPlan();
+    }
+
+    await this.syncConfig();
+    if (input.roadmap) {
+      await this.checkpointAction("RoadmapReview", "edit", {
+        notes: JSON.stringify(input.roadmap, null, 2),
+      });
+    }
+    if (input.hypotheses) {
+      await this.checkpointAction("HypothesisReview", "edit", {
+        notes: JSON.stringify(input.hypotheses, null, 2),
+      });
+    }
+    if (input.notes?.trim() && !input.roadmap && !input.hypotheses) {
+      await this.checkpointAction("RoadmapReview", "edit", {
+        notes: input.notes.trim(),
+      });
+    }
+    return this.getTestingPlan();
   },
 
   async getTestingPlan(): Promise<{
@@ -1165,6 +1409,167 @@ Respond to the latest user message. If tools already ran, incorporate their resu
           : "No analytics yet — publish experiments and connect Zernio."),
       updatedAt: new Date().toISOString(),
     };
+  },
+
+  /**
+   * Queue a carousel from an idea/concept (agent or Test tab).
+   * Simulation: local preview card. Real: Open Carrusel + seeded slides.
+   */
+  async queueCarouselFromIdea(
+    input: QueueOpenCarouselOptions & { idea: string },
+  ): Promise<OpenCarouselItem> {
+    const idea = input.idea.trim();
+    if (!idea) throw new Error("Provide an idea or concept to queue a carousel.");
+
+    const options: QueueOpenCarouselOptions = {
+      idea,
+      name: input.name?.trim() || undefined,
+      aspectRatio: input.aspectRatio,
+      slides: input.slides,
+    };
+
+    let item: OpenCarouselItem;
+    if (!useLive()) {
+      item = buildDemoQueuedCarousel(options);
+    } else {
+      const baseUrl = loadSettings().openCarouselBaseUrl;
+      item = await queueOpenCarousel(baseUrl, options);
+    }
+    upsertQueuedCarousel(item);
+    return item;
+  },
+
+  /**
+   * Queue a new Open Carrusel deck for the Test tab (generic / no idea).
+   */
+  async queueTestCarousel(idea?: string): Promise<OpenCarouselItem> {
+    if (idea?.trim()) {
+      return this.queueCarouselFromIdea({ idea: idea.trim() });
+    }
+    if (!useLive()) {
+      const template =
+        DEMO_QUEUED_CAROUSELS[
+          Math.floor(Math.random() * DEMO_QUEUED_CAROUSELS.length)
+        ] ?? DEMO_QUEUED_CAROUSELS[0];
+      const id = `demo-oc-${Date.now().toString(36)}`;
+      const item: OpenCarouselItem = {
+        ...template,
+        id,
+        name: `Test queue ${new Date().toLocaleTimeString()}`,
+        status: "queued",
+        updatedAt: new Date().toISOString(),
+        slides: template.slides.map((s, i) => ({
+          ...s,
+          id: `${id}-s${i}`,
+        })),
+        postVariantId: undefined,
+        publishedAt: undefined,
+        publishMessage: undefined,
+      };
+      upsertQueuedCarousel(item);
+      return item;
+    }
+    const baseUrl = loadSettings().openCarouselBaseUrl;
+    const item = await queueOpenCarousel(baseUrl);
+    upsertQueuedCarousel(item);
+    return item;
+  },
+
+  /**
+   * Create a Zernio post (live publish or draft) from a queued carousel.
+   * Simulation: local success. Real: POST https://zernio.com/api/v1/posts
+   */
+  async publishCarouselToZernio(carousel: OpenCarouselItem): Promise<{
+    ok: boolean;
+    mode: "live" | "draft" | "recorded" | "simulation";
+    postVariantId: string;
+    publishedAt: string;
+    message: string;
+    zernioPostId?: string;
+    platformPostUrl?: string;
+  }> {
+    const postVariantId =
+      carousel.postVariantId ||
+      `pv-${carousel.id.slice(0, 20)}-${Date.now().toString(36)}`;
+
+    if (!useLive()) {
+      return {
+        ok: true,
+        mode: "simulation",
+        postVariantId,
+        publishedAt: new Date().toISOString(),
+        message: `Simulation · registered ${postVariantId} with Zernio (demo).`,
+      };
+    }
+
+    const s = loadSettings();
+    if (!s.zernioApiKey.trim()) {
+      throw new Error(
+        "Add your Zernio API key in Settings, switch to real-data mode, Save, then retry.",
+      );
+    }
+
+    try {
+      await this.syncConfig();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Could not sync Settings to API before Zernio publish. ${msg}`,
+      );
+    }
+
+    const slideTexts = (carousel.slides ?? [])
+      .map((slide) =>
+        slide.html
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
+      )
+      .filter(Boolean);
+
+    try {
+      const raw = await liveFetch<{
+        ok?: boolean;
+        mode?: "live" | "draft" | "recorded";
+        postVariantId?: string;
+        publishedAt?: string;
+        message?: string;
+        zernioPostId?: string;
+        platformPostUrl?: string;
+      }>("/api/content-creator-ai/zernio/publish", {
+        method: "POST",
+        body: JSON.stringify({
+          postVariantId,
+          carouselId: carousel.id,
+          name: carousel.name,
+          caption: carousel.caption,
+          platform: s.zernioPlatform || "linkedin",
+          accountId: s.zernioAccountId || undefined,
+          publishNow: true,
+          aspectRatio: carousel.aspectRatio,
+          slideCount: carousel.slideCount,
+          slideTexts,
+        }),
+      });
+
+      return {
+        ok: Boolean(raw.ok),
+        mode: raw.mode ?? "recorded",
+        postVariantId: raw.postVariantId ?? postVariantId,
+        publishedAt: raw.publishedAt ?? new Date().toISOString(),
+        message: raw.message ?? "Zernio response received",
+        zernioPostId: raw.zernioPostId,
+        platformPostUrl: raw.platformPostUrl,
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/No route for POST .*zernio\/publish/i.test(msg)) {
+        throw new Error(
+          "API is missing /zernio/publish — restart with npm run api:dev (or npm run dev:stack) so the new route loads.",
+        );
+      }
+      throw e;
+    }
   },
 
   async getOrganization(): Promise<OrganizationContext> {

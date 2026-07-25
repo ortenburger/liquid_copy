@@ -96,8 +96,21 @@
   gap: var(--space-md);
 }
 
-.chat-side .org-scope-chip,
-.chat-side a.org-scope-chip {
+.org-scope-chip {
   display: inline-block;
+  border: 1px solid var(--outline-hairline);
+  background: transparent;
+  color: var(--on-surface-variant);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font: var(--text-label-mono);
+  letter-spacing: 0.03em;
+  cursor: pointer;
   text-decoration: none;
+}
+
+.org-scope-chip.is-active {
+  border-color: var(--accent);
+  color: var(--on-surface);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
