@@ -84,7 +84,10 @@ export function TestPage() {
     });
   }
 
-  async function onPublish(carousel: OpenCarouselItem) {
+  async function onPublish(
+    carousel: OpenCarouselItem,
+    options?: { simulate?: boolean },
+  ) {
     if (carousel.status === "published" || carousel.status === "publishing") {
       return;
     }
@@ -98,7 +101,7 @@ export function TestPage() {
       ),
     );
     try {
-      const result = await api.publishCarouselToZernio(carousel);
+      const result = await api.publishCarouselToZernio(carousel, options);
       const status = !result.ok
         ? ("failed" as const)
         : result.mode === "draft"
@@ -177,8 +180,9 @@ export function TestPage() {
 
       <p className="page-lead">
         Queue an Open Carrusel deck, preview slides, then publish to Zernio as a
-        multi-image carousel (exported slide PNGs). Needs Open Carrusel running
-        and Zernio keys under{" "}
+        multi-image carousel (exported slide PNGs) — or use{" "}
+        <strong>Simulate Zernio</strong> when the live API is unavailable.
+        Needs Open Carrusel running and Zernio keys under{" "}
         <Link to="/app/settings">Settings</Link>
         {!simulation ? (
           <>
@@ -233,11 +237,23 @@ export function TestPage() {
           renderActions={(c) => (
             <>
               <Button
-                variant="accent"
+                variant="ghost"
                 disabled={
                   publishingId === c.id ||
                   c.status === "published" ||
                   c.status === "publishing"
+                }
+                onClick={() => void onPublish(c, { simulate: true })}
+              >
+                {publishingId === c.id ? "Working…" : "Simulate Zernio"}
+              </Button>
+              <Button
+                variant="accent"
+                disabled={
+                  publishingId === c.id ||
+                  c.status === "published" ||
+                  c.status === "publishing" ||
+                  simulation
                 }
                 onClick={() => void onPublish(c)}
               >

@@ -25,6 +25,10 @@ import {
   saveSettings,
 } from "./settings";
 import { PLAN_CHECKPOINT_STAGES } from "./simple-ui-nav";
+import {
+  recordSimulatedPublish,
+  simulatedPublishesToAnalyticsRows,
+} from "./zernio-simulate";
 import type {
   AnalyticsRow,
   AnalyticsSummary,
@@ -380,6 +384,7 @@ function mapWorkflowStatus(raw: Record<string, unknown>): WorkflowStatus {
       studioPath:
         typeof output?.studioPath === "string" ? output.studioPath : undefined,
       error: found?.error ? String(found.error) : undefined,
+      output,
     };
   });
 
@@ -433,6 +438,64 @@ function mapPassages(raw: unknown): RAGPassage[] {
       similarityScore: Number(p.similarityScore ?? p.score ?? 0),
       scope: String(p.scope ?? "company_memory"),
     }));
+}
+
+function tryParseRoadmap(raw: string): RoadmapSummary | null {
+  try {
+    const parsed = JSON.parse(raw) as RoadmapSummary;
+    if (parsed && Array.isArray(parsed.weeks)) return parsed;
+  } catch {
+    /* not JSON / not UI shape */
+  }
+  return null;
+}
+
+/** Map engine ExperimentationRoadmap → Simple UI RoadmapSummary. */
+function roadmapFromEngine(raw: unknown): RoadmapSummary | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as {
+    title?: string;
+    durationWeeks?: number;
+    entries?: Array<{
+      weekNumber?: number;
+      theme?: string;
+      businessObjectiveRef?: string;
+    }>;
+  };
+  if (Array.isArray(r.entries) && r.entries.length > 0) {
+    return {
+      title: r.title?.trim() || "Experiment roadmap",
+      summary: `${r.durationWeeks ?? r.entries.length} week plan · ${r.entries.length} slots`,
+      weeks: r.entries.map((e, i) => ({
+        week: e.weekNumber ?? i + 1,
+        theme: e.theme?.trim() || `Week ${e.weekNumber ?? i + 1}`,
+        objective: e.businessObjectiveRef?.trim() || e.theme?.trim() || "",
+      })),
+    };
+  }
+  return null;
+}
+
+function hypothesisFromEngine(
+  output: Record<string, unknown> | undefined,
+  platform: SocialPlatform,
+): HypothesisCard | null {
+  if (!output) return null;
+  const hyp = (output.hypothesis ?? output) as {
+    id?: string;
+    hook?: string;
+    angle?: string;
+    theme?: string;
+  };
+  if (typeof hyp.hook !== "string" || !hyp.hook.trim()) return null;
+  return {
+    id: hyp.id?.trim() || "hyp-live",
+    hook: hyp.hook.trim(),
+    angle: hyp.angle?.trim() || hyp.theme?.trim(),
+    platform,
+    status: "draft_review",
+    title: hyp.theme?.trim(),
+  };
 }
 
 const statusListeners = new Set<() => void>();
@@ -1399,19 +1462,28 @@ Answer:`;
     const hypCp = status.checkpoints.find(
       (c) => c.stage === "HypothesisReview",
     );
+    const roadmapStage = status.stages.find(
+      (s) => s.stage === "RoadmapGeneration",
+    );
+    const hypStage = status.stages.find(
+      (s) => s.stage === "HypothesisGeneration",
+    );
+
     let roadmap: RoadmapSummary | null = null;
-    let roadmapText: string | null = roadmapCp?.pendingOutput ?? null;
+    let roadmapText: string | null = null;
+
     if (roadmapCp?.pendingOutput) {
-      try {
-        const parsed = JSON.parse(roadmapCp.pendingOutput) as RoadmapSummary;
-        if (parsed && Array.isArray(parsed.weeks)) {
-          roadmap = parsed;
-          roadmapText = null;
-        }
-      } catch {
-        /* keep raw text */
-      }
+      const fromCp = tryParseRoadmap(roadmapCp.pendingOutput);
+      if (fromCp) roadmap = fromCp;
+      else roadmapText = roadmapCp.pendingOutput;
     }
+    if (!roadmap && roadmapStage?.output?.roadmap) {
+      roadmap = roadmapFromEngine(roadmapStage.output.roadmap);
+    }
+    if (!roadmap && !roadmapText && roadmapStage?.summary) {
+      roadmapText = roadmapStage.summary;
+    }
+
     let hypotheses: HypothesisCard[] = [];
     if (hypCp?.pendingOutput) {
       try {
@@ -1427,6 +1499,13 @@ Answer:`;
           },
         ];
       }
+    }
+    if (hypotheses.length === 0) {
+      const fromStage = hypothesisFromEngine(
+        hypStage?.output,
+        status.platforms[0] ?? "linkedin",
+      );
+      if (fromStage) hypotheses = [fromStage];
     }
     return { roadmap, roadmapText, hypotheses };
   },
@@ -1474,22 +1553,26 @@ Answer:`;
       "winning hooks experiment outcomes engagement metrics",
       { scope: "experiment_history", limit: 8 },
     );
+    const simulated = simulatedPublishesToAnalyticsRows();
 
-    const rows: AnalyticsRow[] = experiments.map((e) => ({
-      id: e.id,
-      title: e.title,
-      hook: e.hook,
-      platform: e.platform,
-      status: e.status,
-      impressions: 0,
-      engagementRate: 0,
-      ctr: 0,
-      saves: 0,
-      shares: 0,
-      comments: 0,
-      winner: e.status === "won",
-      note: passages.find((p) => p.sourceDoc.includes(e.id))?.content.slice(0, 160),
-    }));
+    const rows: AnalyticsRow[] = [
+      ...simulated,
+      ...experiments.map((e) => ({
+        id: e.id,
+        title: e.title,
+        hook: e.hook,
+        platform: e.platform,
+        status: e.status,
+        impressions: 0,
+        engagementRate: 0,
+        ctr: 0,
+        saves: 0,
+        shares: 0,
+        comments: 0,
+        winner: e.status === "won",
+        note: passages.find((p) => p.sourceDoc.includes(e.id))?.content.slice(0, 160),
+      })),
+    ];
 
     if (rows.length === 0 && passages.length > 0) {
       for (const [i, p] of passages.entries()) {
@@ -1510,16 +1593,22 @@ Answer:`;
       }
     }
 
-    const winner = rows.find((r) => r.winner) ?? rows[0];
+    const winner =
+      rows.find((r) => r.winner) ??
+      rows.find((r) => r.impressions > 0) ??
+      rows[0];
+    const hasSim = simulated.length > 0;
     return {
       rows,
       winnerId: winner?.id,
       inconclusive: rows.every((r) => r.impressions === 0),
       summary:
         passages[0]?.content.slice(0, 280) ??
-        (rows.length
-          ? `${rows.length} experiment rows loaded. Configure Zernio for live metrics.`
-          : "No analytics yet — publish experiments and connect Zernio."),
+        (hasSim
+          ? `${simulated.length} simulated Zernio publish(es) with demo metrics.`
+          : rows.length
+            ? `${rows.length} experiment rows loaded. Configure Zernio for live metrics, or use Simulate Zernio on Test.`
+            : "No analytics yet — publish experiments, Simulate Zernio on Test, or connect Zernio."),
       updatedAt: new Date().toISOString(),
     };
   },
@@ -1632,8 +1721,12 @@ Answer:`;
   /**
    * Publish a carousel to Zernio as a multi-image post:
    * Open Carrusel PNG export → Zernio media presign/upload → POST /v1/posts.
+   * Pass `{ simulate: true }` to skip the real API (works in real-data mode).
    */
-  async publishCarouselToZernio(carousel: OpenCarouselItem): Promise<{
+  async publishCarouselToZernio(
+    carousel: OpenCarouselItem,
+    options?: { simulate?: boolean },
+  ): Promise<{
     ok: boolean;
     mode: "live" | "draft" | "recorded" | "simulation";
     postVariantId: string;
@@ -1647,13 +1740,23 @@ Answer:`;
       carousel.postVariantId ||
       `pv-${carousel.id.slice(0, 20)}-${Date.now().toString(36)}`;
 
-    if (!useLive()) {
+    const forceSimulate = options?.simulate === true || !useLive();
+    if (forceSimulate) {
+      const s = loadSettings();
+      const sim = recordSimulatedPublish({
+        carouselId: carousel.id,
+        name: carousel.name,
+        postVariantId,
+        platform: s.zernioPlatform || "linkedin",
+        caption: carousel.caption,
+      });
       return {
         ok: true,
         mode: "simulation",
         postVariantId,
-        publishedAt: new Date().toISOString(),
-        message: `Simulation · would export ${carousel.slideCount || carousel.slides?.length || 0} slide PNGs and post a multi-image carousel to Zernio.`,
+        publishedAt: sim.publishedAt,
+        message: `Simulated Zernio publish · ${carousel.slideCount || carousel.slides?.length || 0} slides · ${sim.impressions.toLocaleString()} impressions · ${(sim.engagementRate * 100).toFixed(1)}% engagement (demo metrics).`,
+        zernioPostId: `sim-post-${sim.id}`,
         mediaCount: carousel.slideCount || carousel.slides?.length || 0,
       };
     }
@@ -1661,7 +1764,7 @@ Answer:`;
     const s = loadSettings();
     if (!s.zernioApiKey.trim()) {
       throw new Error(
-        "Add your Zernio API key in Settings, switch to real-data mode, Save, then retry.",
+        "Zernio API key missing — use Simulate Zernio, or add a key in Settings and retry live publish.",
       );
     }
     if (!s.openCarouselBaseUrl.trim()) {
@@ -1731,7 +1834,7 @@ Answer:`;
       const msg = e instanceof Error ? e.message : String(e);
       if (/No route for POST .*zernio\/publish/i.test(msg)) {
         throw new Error(
-          "API is missing /zernio/publish — restart with npm run api:dev (or npm run dev:stack) so the new route loads.",
+          "API is missing /zernio/publish — restart with npm run api:dev (or npm run dev:stack) so the new route loads. Or use Simulate Zernio.",
         );
       }
       throw e;

@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
+import { WorkflowStagesPanel } from "../../components/workspace/WorkflowStagesPanel";
 import { api } from "../../lib/api";
 import {
   useAsyncAction,
@@ -10,20 +11,7 @@ import {
   useWorkflowStatus,
 } from "../../lib/hooks";
 import { loadSettings } from "../../lib/settings";
-import type { StageStatus } from "../../lib/types";
 import "./workspace.css";
-
-function toneFor(status: StageStatus) {
-  if (status === "completed") return "active" as const;
-  if (status === "in_progress" || status === "awaiting_approval")
-    return "processing" as const;
-  if (status === "failed") return "failed" as const;
-  return "idle" as const;
-}
-
-function labelStatus(status: StageStatus) {
-  return status.replace(/_/g, " ");
-}
 
 export function OverviewPage() {
   const status = useWorkflowStatus();
@@ -136,37 +124,7 @@ export function OverviewPage() {
 
       <Progress active={processing || busy} label="Agents advancing the experiment loop" />
 
-      <section className="panel">
-        <div className="panel-head">
-          <h2 className="panel-title">Workflow stages</h2>
-          <span className="panel-meta">Current · {status.currentStage}</span>
-        </div>
-        <ol className="stage-rail">
-          {status.stages.map((stage) => (
-            <li
-              key={stage.stage}
-              className={`stage-item ${
-                stage.stage === status.currentStage ? "is-current" : ""
-              }`}
-            >
-              <div className="stage-top">
-                <span className="stage-name">{stage.stage}</span>
-                <Badge tone={toneFor(stage.status)}>
-                  {labelStatus(stage.status)}
-                </Badge>
-              </div>
-              {stage.summary ? (
-                <p className="stage-summary">{stage.summary}</p>
-              ) : null}
-              {stage.studioPath ? (
-                <p className="stage-summary">
-                  <Link to={stage.studioPath}>Open in Carousels</Link>
-                </p>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      </section>
+      <WorkflowStagesPanel status={status} />
     </div>
   );
 }

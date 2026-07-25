@@ -142,6 +142,26 @@ export class CheckpointManager {
     return this.mode;
   }
 
+  /** Restore enabled flags (and idle status) from a persistence snapshot. */
+  restoreCheckpointFlags(
+    checkpoints: Array<{ stage: string; enabled: boolean; status?: string }>,
+  ): void {
+    for (const saved of checkpoints) {
+      const state = this.states.get(saved.stage as ApprovalCheckpointStage);
+      if (!state) continue;
+      state.enabled = Boolean(saved.enabled);
+      // Don't resume mid-wait timers across process restarts — back to idle.
+      if (state.status === "waiting") {
+        state.status = "idle";
+        state.pendingOutput = undefined;
+        state.reachedAt = undefined;
+      }
+    }
+    if (this.mode === "Human_In_The_Loop_Mode" && this.enabledCount() === 0) {
+      this.mode = "Full_Auto_Mode";
+    }
+  }
+
   getState(stage: ApprovalCheckpointStage): CheckpointState {
     const state = this.states.get(stage);
     if (!state) throw new Error(`Unknown checkpoint stage: ${stage}`);

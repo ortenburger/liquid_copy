@@ -105,7 +105,7 @@ function SortableSlideThumb({
 
       {/* Hover actions */}
       <div className="absolute -top-1 -right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-        {onUndo && slide.previousVersions.length > 0 && (
+        {onUndo && (slide.previousVersions?.length ?? 0) > 0 && (
           <Button
             variant="ghost"
             size="icon"

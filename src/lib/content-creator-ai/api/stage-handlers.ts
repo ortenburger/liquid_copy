@@ -371,13 +371,24 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
       throw new Error("HypothesisGeneration needs goal, personas, and a roadmap entry.");
     }
 
-    const generated = await generateHypothesis({
+    const baseOpts = {
       roadmapEntry: entry as ExperimentationRoadmap["entries"][number],
       marketingGoal: goal,
       audiencePersonas: personas,
       firstCycle: true,
       llm: llm(),
-    });
+    };
+
+    let generated = await generateHypothesis(baseOpts);
+
+    // Thin history (1–2 priors) — retry once with forceProceed so Full Auto
+    // can keep moving instead of stalling until three experiments exist.
+    if (generated.status === "insufficient_history") {
+      console.warn(
+        `[workflow] HypothesisGeneration — ${generated.message}; retrying once with forceProceed`,
+      );
+      generated = await generateHypothesis({ ...baseOpts, forceProceed: true });
+    }
 
     if (generated.status !== "generated") {
       throw new Error(generated.message);

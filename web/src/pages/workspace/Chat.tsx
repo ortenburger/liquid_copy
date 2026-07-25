@@ -4,8 +4,9 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { TextArea } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
+import { WorkflowStagesPanel } from "../../components/workspace/WorkflowStagesPanel";
 import { api, type ChatMessage } from "../../lib/api";
-import { useDataMode } from "../../lib/hooks";
+import { useDataMode, useWorkflowStatus } from "../../lib/hooks";
 import { loadSettings } from "../../lib/settings";
 import "./workspace.css";
 import "./Chat.css";
@@ -21,6 +22,7 @@ function msg(role: ChatMessage["role"], content: string): ChatMessage {
 
 export function ChatPage() {
   const { simulation } = useDataMode();
+  const workflowStatus = useWorkflowStatus();
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
     msg(
       "assistant",
@@ -76,8 +78,11 @@ export function ChatPage() {
 
       <p className="page-lead">
         Main workspace. Grounded in RAG, KB markdown, and agent tools — ask
-        here, or open <Link to="/app/test">Test</Link> to publish carousels.
+        here, open <Link to="/app/testing-plan">Testing plan</Link> for the
+        stage rail, or <Link to="/app/test">Test</Link> to publish carousels.
       </p>
+
+      <WorkflowStagesPanel status={workflowStatus} />
 
       {error ? <p className="error-banner">{error}</p> : null}
 

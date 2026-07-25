@@ -94,6 +94,8 @@ export interface StageRecord {
   summary?: string;
   studioPath?: string;
   error?: string;
+  /** Raw completed-stage payload (roadmap, hypothesis, …). */
+  output?: Record<string, unknown>;
 }
 
 export interface CheckpointRecord {

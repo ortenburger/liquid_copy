@@ -30,6 +30,8 @@ export function SettingsPage() {
   const [listing, setListing] = useState(false);
   const [models, setModels] = useState<string[]>([]);
   const [apiHealth, setApiHealth] = useState<string | null>(null);
+  const [zernioSimOut, setZernioSimOut] = useState<string | null>(null);
+  const [zernioSimBusy, setZernioSimBusy] = useState(false);
   const [testOut, setTestOut] = useState<{
     ok: boolean;
     message: string;
@@ -211,7 +213,7 @@ export function SettingsPage() {
             navigate("/app", { replace: true });
           }}
           label="Simple UI"
-          description="Reduce navigation to Chat (agent), Testing plan, Test, and Settings."
+          description="Reduce navigation to Chat (with live workflow stages), Testing plan, Test, and Settings."
         />
       </section>
 
@@ -336,10 +338,60 @@ export function SettingsPage() {
             Zernio dashboard
           </a>
           , then paste its account <code>_id</code> (or leave blank for the first
-          connected account). Test → Publish exports Open Carrusel slide PNGs and
-          publishes as a multi-image carousel (slide PNGs from Open Carrusel).
-          Keep Open Carrusel running so export can render slides.
+          connected account). Test → Publish exports Open Carrusel slide PNGs as
+          a multi-image carousel. Keep Open Carrusel running for export; use
+          Simulate when the live API is unavailable.
         </p>
+        <div className="list-row-actions" style={{ marginTop: "var(--space-md)" }}>
+          <Button
+            variant="accent"
+            disabled={zernioSimBusy}
+            onClick={() => {
+              void (async () => {
+                setZernioSimBusy(true);
+                setZernioSimOut(null);
+                try {
+                  const result = await api.publishCarouselToZernio(
+                    {
+                      id: `settings-sim-${Date.now().toString(36)}`,
+                      name: "Settings · Zernio simulation",
+                      aspectRatio: "4:5",
+                      slideCount: 1,
+                      slides: [
+                        {
+                          id: "s1",
+                          html: "<div>Simulated slide for Zernio dry-run</div>",
+                          order: 0,
+                        },
+                      ],
+                      caption: "Dry-run publish from Liquid Copy Settings.",
+                      updatedAt: new Date().toISOString(),
+                      status: "queued",
+                    },
+                    { simulate: true },
+                  );
+                  setZernioSimOut(result.message);
+                } catch (e) {
+                  setZernioSimOut(
+                    e instanceof Error ? e.message : String(e),
+                  );
+                } finally {
+                  setZernioSimBusy(false);
+                }
+              })();
+            }}
+          >
+            {zernioSimBusy ? "Simulating…" : "Simulate Zernio"}
+          </Button>
+          <Link to="/app/test" className="panel-meta">
+            Open Test queue →
+          </Link>
+        </div>
+        {zernioSimOut ? (
+          <p className="info-banner" style={{ marginTop: "var(--space-sm)" }}>
+            {zernioSimOut}
+          </p>
+        ) : null}
       </section>
 
       {/* LLM */}

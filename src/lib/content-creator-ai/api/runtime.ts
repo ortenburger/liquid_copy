@@ -27,6 +27,12 @@ import {
 } from "../integrations/llm.js";
 import { traceability, type TraceabilityBuilder } from "./traceability.js";
 import { registerWorkflowStageHandlers } from "./stage-handlers.js";
+import {
+  clearWorkflowSnapshot,
+  hydrateWorkflowFromSnapshot,
+  loadWorkflowSnapshot,
+  saveWorkflowSnapshot,
+} from "./workflow-persistence.js";
 import { SUPPORTED_PLATFORMS } from "../agents/strategy-agent/goal-validation.js";
 
 /** Requirement 14.5 — manual knowledge search returns up to 10 results. */
@@ -58,12 +64,43 @@ function wireWorkflowHandlers(workflow: WorkflowEngine, audienceAgent: AudienceA
   });
 }
 
+function persistWorkflow(workflow: WorkflowEngine): void {
+  try {
+    saveWorkflowSnapshot(workflow);
+  } catch (err) {
+    console.warn(
+      `[workflow] failed to persist snapshot: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
   const checkpoints = new CheckpointManager();
   const audienceAgent = new AudienceAgent({ llm: getLLMClient() });
   const workflow = new WorkflowEngine({ checkpoints });
   wireWorkflowHandlers(workflow, audienceAgent);
+
+  const snapshot = loadWorkflowSnapshot();
+  if (snapshot) {
+    hydrateWorkflowFromSnapshot(workflow, snapshot);
+  }
+
+  workflow.subscribe((event) => {
+    if (
+      event.type === "stage_completed" ||
+      event.type === "stage_failed" ||
+      event.type === "stage_awaiting_approval" ||
+      event.type === "stage_blocked" ||
+      event.type === "mode_changed" ||
+      event.type === "workflow_completed"
+    ) {
+      persistWorkflow(workflow);
+    }
+  });
+
   runtime = {
     checkpoints,
     workflow,
@@ -485,7 +522,9 @@ export function updatePlatformSelection(
   }
 
   // Requirement 5.2 — replace the previous selection with the updated set.
-  getRuntime().workflow.setSelectedPlatforms(selected);
+  const { workflow } = getRuntime();
+  workflow.setSelectedPlatforms(selected);
+  persistWorkflow(workflow);
 
   if (selected.length === 0) {
     return {

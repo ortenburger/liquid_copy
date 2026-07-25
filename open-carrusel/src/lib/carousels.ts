@@ -5,8 +5,35 @@ import { MAX_SLIDES, MAX_VERSIONS } from "@/types/carousel";
 
 const FILE = "carousels.json";
 
+/** Ensure every slide has the fields the editor expects (AI seeds omit some). */
+export function normalizeSlide(
+  raw: Partial<Slide> & { html?: string; id?: string },
+  orderFallback = 0,
+): Slide {
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : generateId(),
+    html: typeof raw.html === "string" ? raw.html : "",
+    previousVersions: Array.isArray(raw.previousVersions)
+      ? raw.previousVersions.filter((v): v is string => typeof v === "string")
+      : [],
+    order: typeof raw.order === "number" ? raw.order : orderFallback,
+    notes: typeof raw.notes === "string" ? raw.notes : "",
+  };
+}
+
+function normalizeCarousel(carousel: Carousel): Carousel {
+  return {
+    ...carousel,
+    slides: (carousel.slides ?? []).map((s, i) => normalizeSlide(s, i)),
+    referenceImages: carousel.referenceImages ?? [],
+    tags: carousel.tags ?? [],
+  };
+}
+
 async function load(): Promise<CarouselsData> {
-  return readDataSafe<CarouselsData>(FILE, { carousels: [] });
+  const data = await readDataSafe<CarouselsData>(FILE, { carousels: [] });
+  data.carousels = data.carousels.map(normalizeCarousel);
+  return data;
 }
 
 async function save(data: CarouselsData): Promise<void> {
@@ -47,12 +74,32 @@ export async function createCarousel(
 
 export async function updateCarousel(
   id: string,
-  updates: Partial<Pick<Carousel, "name" | "aspectRatio" | "tags" | "chatSessionId" | "caption" | "hashtags">>
+  updates: Partial<
+    Pick<
+      Carousel,
+      | "name"
+      | "aspectRatio"
+      | "tags"
+      | "chatSessionId"
+      | "caption"
+      | "hashtags"
+      | "slides"
+    >
+  >,
 ): Promise<Carousel | null> {
   const data = await load();
   const idx = data.carousels.findIndex((c) => c.id === id);
   if (idx === -1) return null;
-  Object.assign(data.carousels[idx], updates, { updatedAt: now() });
+
+  const { slides, ...rest } = updates;
+  Object.assign(data.carousels[idx], rest, { updatedAt: now() });
+
+  if (Array.isArray(slides)) {
+    data.carousels[idx].slides = slides
+      .slice(0, MAX_SLIDES)
+      .map((s, i) => normalizeSlide(s, i));
+  }
+
   await save(data);
   return data.carousels[idx];
 }
@@ -128,6 +175,10 @@ export async function updateSlide(
   const slide = carousel.slides.find((s) => s.id === slideId);
   if (!slide) return null;
 
+  if (!Array.isArray(slide.previousVersions)) {
+    slide.previousVersions = [];
+  }
+
   // Save current HTML to version history before overwriting
   if (updates.html && updates.html !== slide.html) {
     slide.previousVersions.push(slide.html);
@@ -192,7 +243,9 @@ export async function undoSlide(
   const carousel = data.carousels.find((c) => c.id === carouselId);
   if (!carousel) return null;
   const slide = carousel.slides.find((s) => s.id === slideId);
-  if (!slide || slide.previousVersions.length === 0) return null;
+  if (!slide || !Array.isArray(slide.previousVersions) || slide.previousVersions.length === 0) {
+    return null;
+  }
 
   const previousHtml = slide.previousVersions.pop()!;
   slide.html = previousHtml;

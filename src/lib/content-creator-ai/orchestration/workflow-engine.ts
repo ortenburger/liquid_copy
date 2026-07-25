@@ -228,6 +228,47 @@ export class WorkflowEngine {
     this.emit({ type: "mode_changed", mode: this.getMode() });
   }
 
+  /**
+   * Restore stages / platforms / mode from a disk snapshot (API restart).
+   * Handlers stay as registered on this instance.
+   */
+  restoreFromSnapshot(snapshot: {
+    mode?: OperatingMode;
+    selectedPlatforms?: SocialPlatform[];
+    stages?: StageRecord[];
+    checkpoints?: Array<{
+      stage: string;
+      enabled: boolean;
+      status?: string;
+    }>;
+  }): void {
+    if (snapshot.mode) {
+      this.checkpoints.setMode(snapshot.mode);
+    }
+    if (Array.isArray(snapshot.selectedPlatforms)) {
+      this.selectedPlatforms = [...snapshot.selectedPlatforms];
+    }
+    if (Array.isArray(snapshot.checkpoints)) {
+      this.checkpoints.restoreCheckpointFlags(snapshot.checkpoints);
+    }
+    if (Array.isArray(snapshot.stages)) {
+      for (const saved of snapshot.stages) {
+        if (!saved?.stage || !this.records.has(saved.stage)) continue;
+        const current = this.records.get(saved.stage)!;
+        this.records.set(saved.stage, {
+          ...current,
+          status: saved.status ?? "pending",
+          output: saved.output,
+          approvedByUser: Boolean(saved.approvedByUser),
+          resolution: saved.resolution,
+          error: saved.error,
+          startedAt: saved.startedAt,
+          completedAt: saved.completedAt,
+        });
+      }
+    }
+  }
+
   // ---- Execution ----
 
   /**

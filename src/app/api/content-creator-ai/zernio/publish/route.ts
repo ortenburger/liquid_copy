@@ -20,6 +20,8 @@ interface Body {
   slideCount?: number;
   slideTexts?: string[];
   openCarouselBaseUrl?: string;
+  /** Skip the live Zernio API and return a successful dry-run. */
+  simulate?: boolean;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -32,6 +34,19 @@ export async function POST(request: Request): Promise<Response> {
   const postVariantId =
     body.postVariantId?.trim() ||
     `pv-${body.carouselId.trim().slice(0, 24)}-${Date.now().toString(36)}`;
+
+  if (body.simulate === true) {
+    const publishedAt = new Date().toISOString();
+    return jsonResponse({
+      ok: true,
+      mode: "recorded",
+      postVariantId,
+      publishedAt,
+      message: `Simulated Zernio publish for “${body.name?.trim() || "carousel"}” (API dry-run — no live post).`,
+      zernioPostId: `sim-${postVariantId}`,
+      dashboardHint: "https://zernio.com",
+    });
+  }
 
   try {
     const result = await publishCarouselToZernio({
