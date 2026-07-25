@@ -1,8 +1,10 @@
+import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useAsyncAction, useWorkflowStatus } from "../../lib/hooks";
+import { isDemoWorkspace, loadSettings } from "../../lib/settings";
 import type { StageStatus } from "../../lib/types";
 import "./workspace.css";
 
@@ -24,6 +26,8 @@ export function OverviewPage() {
   const processing = status.stages.some(
     (s) => s.status === "in_progress" || s.status === "awaiting_approval",
   );
+  const demo = isDemoWorkspace();
+  const llm = loadSettings();
 
   return (
     <div className="page stagger-in">
@@ -51,6 +55,18 @@ export function OverviewPage() {
           </Button>
         </div>
       </header>
+
+      {demo ? (
+        <p className="info-banner">
+          <Badge tone="processing">Demo data</Badge>{" "}
+          Workflow, experiments, and knowledge here are simulated in the browser.
+          Configure a real model under{" "}
+          <Link to="/app/settings">Settings</Link> (currently{" "}
+          <strong>{llm.provider}</strong> · {llm.model}). Agent pipelines run for
+          real only when a live API is available via{" "}
+          <code>VITE_API_BASE_URL</code>.
+        </p>
+      ) : null}
 
       {error ? <p className="error-banner">{error}</p> : null}
 

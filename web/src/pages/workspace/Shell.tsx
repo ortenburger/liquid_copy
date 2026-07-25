@@ -10,6 +10,7 @@ const NAV = [
   { to: "/app/experiments", label: "Experiments" },
   { to: "/app/knowledge", label: "Knowledge" },
   { to: "/app/platforms", label: "Platforms" },
+  { to: "/app/settings", label: "Settings" },
 ] as const;
 
 export function WorkspaceShell() {

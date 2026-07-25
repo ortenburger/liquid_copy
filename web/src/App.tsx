@@ -6,6 +6,7 @@ import { CheckpointsPage } from "./pages/workspace/Checkpoints";
 import { ExperimentsPage } from "./pages/workspace/Experiments";
 import { KnowledgePage } from "./pages/workspace/Knowledge";
 import { PlatformsPage } from "./pages/workspace/Platforms";
+import { SettingsPage } from "./pages/workspace/Settings";
 
 export default function App() {
   return (
@@ -18,6 +19,7 @@ export default function App() {
           <Route path="experiments" element={<ExperimentsPage />} />
           <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="platforms" element={<PlatformsPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

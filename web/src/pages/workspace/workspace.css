@@ -186,3 +186,22 @@
   color: var(--status-failed);
   border: 1px solid color-mix(in srgb, var(--status-failed) 25%, transparent);
 }
+
+.info-banner {
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius);
+  background: var(--status-processing-bg);
+  color: var(--on-surface);
+  border: 1px solid color-mix(in srgb, var(--status-processing) 25%, transparent);
+  line-height: 1.5;
+}
+
+.info-banner a {
+  color: var(--secondary);
+  text-decoration: underline;
+}
+
+.info-banner code {
+  font: var(--text-label-mono);
+  letter-spacing: 0.02em;
+}
