@@ -33,9 +33,10 @@ export function ExperimentsPage() {
 
       {!simulation && items.length === 0 ? (
         <p className="empty-hint">
-          No live experiments yet — run the workflow and publish variants to
-          populate this feed.{" "}
-          <Link to="/app">Back to Overview</Link>
+          No live experiments yet — run the workflow, queue a carousel on{" "}
+          <Link to="/app/test">Test</Link>, then Simulate / Publish to Zernio.
+          Simulated publishes also appear on{" "}
+          <Link to="/app/analytics">Analytics</Link>.
         </p>
       ) : null}
 

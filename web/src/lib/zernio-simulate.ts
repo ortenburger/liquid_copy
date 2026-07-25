@@ -2,7 +2,7 @@
  * Local simulated Zernio publishes — used when the real API is unavailable
  * or the operator explicitly chooses Simulate.
  */
-import type { AnalyticsRow, SocialPlatform } from "./types";
+import type { AnalyticsRow, ExperimentCard, SocialPlatform } from "./types";
 
 const STORAGE_KEY = "liquid-copy.zernio-sim.v1";
 
@@ -86,5 +86,16 @@ export function simulatedPublishesToAnalyticsRows(): AnalyticsRow[] {
     comments: r.comments,
     winner: r.engagementRate >= 0.035,
     note: `Simulated Zernio · ${r.postVariantId}`,
+  }));
+}
+
+export function simulatedPublishesToExperimentCards(): ExperimentCard[] {
+  return read().map((r) => ({
+    id: r.id,
+    title: r.name,
+    hook: r.captionPreview || r.name,
+    platform: (r.platform as SocialPlatform) || "linkedin",
+    status: r.engagementRate >= 0.035 ? ("won" as const) : ("published" as const),
+    updatedAt: r.publishedAt,
   }));
 }

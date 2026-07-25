@@ -10,6 +10,7 @@ export const FULL_NAV: NavItem[] = [
   { to: "/app", end: true, label: "Overview" },
   { to: "/app/checkpoints", label: "Checkpoints" },
   { to: "/app/experiments", label: "Experiments" },
+  { to: "/app/analytics", label: "Analytics" },
   { to: "/app/knowledge", label: "Knowledge" },
   { to: "/app/platforms", label: "Platforms" },
   { to: "/app/carousels", label: "Carousels" },
@@ -21,12 +22,13 @@ export const SIMPLE_NAV: NavItem[] = [
   { to: "/app", end: true, label: "Chat" },
   { to: "/app/testing-plan", label: "Testing plan" },
   { to: "/app/test", label: "Test" },
+  { to: "/app/experiments", label: "Experiments" },
+  { to: "/app/analytics", label: "Analytics" },
   { to: "/app/settings", label: "Settings", icon: "gear" },
 ];
 
 export const FULL_ONLY_PREFIXES = [
   "/app/checkpoints",
-  "/app/experiments",
   "/app/knowledge",
   "/app/platforms",
   "/app/carousels",

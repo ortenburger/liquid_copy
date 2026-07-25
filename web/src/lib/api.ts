@@ -28,7 +28,9 @@ import { PLAN_CHECKPOINT_STAGES } from "./simple-ui-nav";
 import {
   recordSimulatedPublish,
   simulatedPublishesToAnalyticsRows,
+  simulatedPublishesToExperimentCards,
 } from "./zernio-simulate";
+import { listQueuedCarousels } from "./carousel-queue-store";
 import type {
   AnalyticsRow,
   AnalyticsSummary,
@@ -1378,8 +1380,86 @@ Answer:`;
   },
 
   async listExperiments(): Promise<ExperimentCard[]> {
-    if (useLive()) return [];
-    return demoStore.listExperiments();
+    if (!useLive()) return demoStore.listExperiments();
+
+    const byId = new Map<string, ExperimentCard>();
+
+    for (const exp of simulatedPublishesToExperimentCards()) {
+      byId.set(exp.id, exp);
+    }
+
+    for (const c of listQueuedCarousels()) {
+      const id = c.postVariantId || c.id;
+      if (byId.has(id)) continue;
+      // Already covered by a simulated publish for this carousel
+      if (
+        [...byId.keys()].some((k) => k.includes(c.id.slice(0, 12))) ||
+        simulatedPublishesToExperimentCards().some((s) =>
+          s.id.includes(c.id.slice(0, 12)),
+        )
+      ) {
+        continue;
+      }
+      const status =
+        c.status === "published"
+          ? ("published" as const)
+          : c.status === "draft"
+            ? ("draft" as const)
+            : c.status === "failed"
+              ? ("failed" as const)
+              : ("queued" as const);
+      byId.set(id, {
+        id,
+        title: c.name,
+        hook: c.caption?.slice(0, 160) || c.name,
+        platform: (loadSettings().zernioPlatform ||
+          "linkedin") as SocialPlatform,
+        status,
+        updatedAt: c.publishedAt || c.updatedAt || new Date().toISOString(),
+      });
+    }
+
+    try {
+      const status = await this.getWorkflowStatus();
+      const content = status.stages.find((s) => s.stage === "ContentGeneration");
+      const variants = content?.output?.variants;
+      if (Array.isArray(variants)) {
+        for (const raw of variants) {
+          if (!raw || typeof raw !== "object") continue;
+          const v = raw as {
+            id?: string;
+            carouselId?: string;
+            caption?: string;
+            platform?: string;
+            status?: string;
+            hypothesisId?: string;
+          };
+          const id = v.id || v.carouselId;
+          if (!id || byId.has(id)) continue;
+          byId.set(id, {
+            id,
+            title: v.caption?.slice(0, 80) || `Variant ${id.slice(0, 8)}`,
+            hook: v.caption?.slice(0, 160) || v.hypothesisId || id,
+            platform: (v.platform ||
+              loadSettings().zernioPlatform ||
+              "linkedin") as SocialPlatform,
+            status:
+              v.status === "published"
+                ? "published"
+                : v.status === "queued"
+                  ? "queued"
+                  : "draft",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch {
+      /* status optional */
+    }
+
+    return [...byId.values()].sort((a, b) =>
+      b.updatedAt.localeCompare(a.updatedAt),
+    );
   },
 
   /**

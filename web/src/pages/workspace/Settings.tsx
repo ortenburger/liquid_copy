@@ -213,7 +213,7 @@ export function SettingsPage() {
             navigate("/app", { replace: true });
           }}
           label="Simple UI"
-          description="Reduce navigation to Chat (with live workflow stages), Testing plan, Test, and Settings."
+          description="Reduce navigation to Chat, Testing plan, Test, Experiments, Analytics, and Settings."
         />
       </section>
 
@@ -389,7 +389,8 @@ export function SettingsPage() {
         </div>
         {zernioSimOut ? (
           <p className="info-banner" style={{ marginTop: "var(--space-sm)" }}>
-            {zernioSimOut}
+            {zernioSimOut}{" "}
+            <Link to="/app/analytics">Open Analytics →</Link>
           </p>
         ) : null}
       </section>
