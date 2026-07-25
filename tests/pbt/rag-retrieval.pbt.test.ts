@@ -88,7 +88,7 @@ describe("RAG retrieval property tests", () => {
           return true;
         },
       ),
-      { numRuns: 50 },
+      { numRuns: 100 },
     );
   });
 

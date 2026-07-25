@@ -73,7 +73,7 @@ liquid_copy/
 ├── .kiro/specs/content-creator-ai/
 ├── tasklist_1.md                 # Shared foundation (done)
 ├── tasklist_2.md                 # Ingestion, strategy, audience, workflow, API
-└── tasklist_3.md                 # Content, publishing, analytics, learning
+└── tasklist_3.md                 # Content, publishing, analytics, learning (done)
 ```
 
 ---
@@ -156,7 +156,7 @@ import { eventBus } from "@/lib/content-creator-ai/orchestration/event-bus";
 |---|---|---|
 | **Task list 1** | Types, KB, RAG, Event Bus | Done |
 | **Task list 2** | Context / Strategy / Audience agents, workflow, API | In progress |
-| **Task list 3** | Content / Analytics / Learning agents, publishing | In progress |
+| **Task list 3** | Content / Analytics / Learning agents, publishing | Done |
 
 ---
 

@@ -92,7 +92,12 @@ export {
   describeMissingFields,
   isMeasurableMetric,
   isSupportedPlatform,
-  SUPPORTED_PLATFORMS,
+  // `SUPPORTED_PLATFORMS` is deliberately NOT re-exported here: the publishing
+  // layer below star-exports a constant of the same name and identical value, and
+  // exporting both would make the name ambiguous at this barrel. The publishing
+  // module is the more natural home for a platform list, so that one wins.
+  // Import this vertical's copy from `agents/strategy-agent/goal-validation.js`
+  // directly if the `readonly` variant is specifically wanted.
   type GoalValidationResult,
   type ContextSufficiency,
 } from "./agents/strategy-agent/goal-validation.js";
@@ -228,3 +233,19 @@ export {
   type PlatformSelectionResult,
   type WorkflowStatusResponse,
 } from "./api/runtime.js";
+
+/** Content / publishing / analytics / learning vertical. */
+export * from "./publishing/platform-validators.js";
+export * from "./publishing/queue.js";
+export * from "./publishing/adapters/index.js";
+
+export * from "./agents/content-agent/index.js";
+export * from "./agents/content-agent/variant-validation.js";
+export * from "./agents/analytics-agent/index.js";
+export * from "./agents/analytics-agent/significance.js";
+export * from "./agents/learning-agent/index.js";
+export * from "./agents/learning-agent/classify.js";
+export * from "./agents/learning-agent/patterns.js";
+export * from "./agents/learning-agent/atomic-update.js";
+
+export * from "./integrations/zernio.js";
