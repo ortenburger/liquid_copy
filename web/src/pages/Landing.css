@@ -44,8 +44,14 @@
 }
 
 .landing-mark {
-  font: var(--text-body-bold);
-  letter-spacing: -0.02em;
+  display: inline-flex;
+  align-items: center;
+}
+
+.landing-mark-img {
+  display: block;
+  height: 36px;
+  width: auto;
 }
 
 .landing-nav-link {
@@ -71,16 +77,22 @@
 }
 
 .landing-brand {
-  font: var(--text-display-lg);
-  letter-spacing: -0.02em;
-  color: var(--primary);
-  margin-bottom: var(--space-lg);
+  margin: 0 0 var(--space-lg);
+}
+
+.landing-brand-img {
+  display: block;
+  width: min(100%, 420px);
+  height: auto;
 }
 
 @media (max-width: 640px) {
-  .landing-brand {
-    font-size: 36px;
-    line-height: 44px;
+  .landing-brand-img {
+    width: min(100%, 280px);
+  }
+
+  .landing-mark-img {
+    height: 28px;
   }
 }
 

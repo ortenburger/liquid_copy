@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 import { Button } from "../components/ui/Button";
+import logo from "../assets/logo.png";
+import logoNav from "../assets/logo-nav.png";
 import "./Landing.css";
 
 export function Landing() {
@@ -7,15 +9,19 @@ export function Landing() {
     <div className="landing">
       <div className="landing-atmosphere" aria-hidden />
       <header className="landing-nav container">
-        <span className="landing-mark">Liquid Intelligence</span>
+        <Link to="/" className="landing-mark" aria-label="Liquid Copy home">
+          <img src={logoNav} alt="" className="landing-mark-img" />
+        </Link>
         <Link to="/app" className="landing-nav-link">
           Open workspace
         </Link>
       </header>
 
       <main className="landing-hero container stagger-in">
-        <p className="landing-brand">Liquid Intelligence</p>
-        <h1 className="landing-headline">Content that learns as it ships.</h1>
+        <h1 className="landing-brand">
+          <img src={logo} alt="Liquid Copy" className="landing-brand-img" />
+        </h1>
+        <p className="landing-headline">Content that learns as it ships.</p>
         <p className="landing-support">
           A continuous experimentation OS — from company context to hypothesis,
           carousel, publish, and measured learning.

@@ -72,7 +72,7 @@ liquid_copy/
 ├── web/                          # Vite operator UI (landing + workspace)
 ├── tests/pbt/                    # Property-based tests (fast-check + Vitest)
 ├── open-carrusel/                # Carousel generation UI + API
-├── design.md                     # Liquid Intelligence design system
+├── design.md                     # Liquid Copy design system
 ├── .kiro/specs/content-creator-ai/
 ├── tasklist_1.md                 # Shared foundation (done)
 ├── tasklist_2.md                 # Ingestion, strategy, audience, workflow, API (done)
@@ -122,7 +122,7 @@ cd open-carrusel && npm install && cd ..
 npm test          # Run Vitest (including property-based tests)
 npm run test:watch
 npm run typecheck
-npm run web:dev   # Liquid Intelligence UI → http://localhost:5173
+npm run web:dev   # Liquid Copy UI → http://localhost:5173
 npm run web:build
 
 # Open Carrusel

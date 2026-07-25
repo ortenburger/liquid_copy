@@ -75,7 +75,7 @@ export const DEMO_PASSAGES: RAGPassage[] = [
   },
   {
     content:
-      "Product: Liquid Intelligence Content OS — hypothesis → Open Carrusel variants → Zernio analytics → KB learning.",
+      "Product: Liquid Copy Content OS — hypothesis → Open Carrusel variants → Zernio analytics → KB learning.",
     sourceDoc: "product_liquid_os",
     similarityScore: 0.79,
     scope: "product_context",

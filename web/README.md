@@ -1,4 +1,4 @@
-# Liquid Intelligence UI
+# Liquid Copy UI
 
 Vite + React operator frontend for liquid_copy.
 

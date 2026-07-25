@@ -51,6 +51,8 @@ class DemoStore {
   platforms: SocialPlatform[] = ["instagram", "linkedin", "tiktok"];
   experiments: ExperimentCard[] = [...DEMO_EXPERIMENTS];
   private listeners = new Set<() => void>();
+  /** Cached for useSyncExternalStore — must be referentially stable until notify(). */
+  private cachedStatus: WorkflowStatus | null = null;
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -58,10 +60,13 @@ class DemoStore {
   }
 
   private notify(): void {
+    this.cachedStatus = null;
     for (const listener of this.listeners) listener();
   }
 
   status(): WorkflowStatus {
+    if (this.cachedStatus) return this.cachedStatus;
+
     const current =
       this.stages.find(
         (s) =>
@@ -71,13 +76,14 @@ class DemoStore {
       this.stages.find((s) => s.status === "pending")?.stage ??
       WORKFLOW_STAGES[WORKFLOW_STAGES.length - 1];
 
-    return {
+    this.cachedStatus = {
       mode: this.mode,
       currentStage: current,
       stages: this.stages.map((s) => ({ ...s })),
       checkpoints: this.checkpoints.map((c) => ({ ...c })),
       platforms: [...this.platforms],
     };
+    return this.cachedStatus;
   }
 
   setMode(mode: OperatingMode): WorkflowStatus {

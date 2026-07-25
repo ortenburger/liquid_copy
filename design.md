@@ -1,5 +1,5 @@
 ---
-name: Liquid Intelligence
+name: Liquid Copy
 colors:
   surface: '#fbf9f9'
   surface-dim: '#dbdad9'

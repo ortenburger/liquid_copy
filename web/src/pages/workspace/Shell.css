@@ -21,9 +21,15 @@
 }
 
 .shell-brand {
-  font: var(--text-body-bold);
-  letter-spacing: -0.02em;
+  display: inline-flex;
+  align-items: center;
   margin-right: auto;
+}
+
+.shell-brand-img {
+  display: block;
+  height: 32px;
+  width: auto;
 }
 
 .shell-nav {

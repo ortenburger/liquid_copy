@@ -1,6 +1,7 @@
 import { NavLink, Outlet, Link } from "react-router-dom";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
+import logoNav from "../../assets/logo-nav.png";
 import "./Shell.css";
 
 const NAV = [
@@ -18,8 +19,8 @@ export function WorkspaceShell() {
     <div className="shell">
       <header className="shell-top">
         <div className="container shell-top-inner">
-          <Link to="/" className="shell-brand">
-            Liquid Intelligence
+          <Link to="/" className="shell-brand" aria-label="Liquid Copy home">
+            <img src={logoNav} alt="Liquid Copy" className="shell-brand-img" />
           </Link>
           <button
             type="button"
