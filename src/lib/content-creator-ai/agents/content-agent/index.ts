@@ -410,19 +410,44 @@ export class ContentAgent {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           errors.push(`OpenCarousel error for ${platform} variant ${i}: ${msg}`);
+          // Full Auto A/B still needs variants — synthesize locally.
+          platformVariants.push(
+            this.synthesizeLocalVariant({
+              hypothesis,
+              platform,
+              aspectRatio,
+              index: i,
+              cta: options?.cta,
+              hashtags: options?.hashtags ?? [],
+              slidesPerVariant: options?.slidesPerVariant ?? 3,
+              withoutBrandContext,
+              traceabilityBase: options?.traceabilityBase,
+              note: `local fallback after: ${msg.slice(0, 120)}`,
+            }),
+          );
         }
       }
 
-      // Enforce Property 19: always land in [2, 5] when generation partially fails
-      // by synthesizing minimal valid fillers only if we have at least 1 real variant
-      // and need to reach the floor — otherwise leave as-is for discard logic.
-      while (
-        platformVariants.length > 0 &&
-        platformVariants.length < 2 &&
-        platformVariants.length < this.variantsPerPlatform
-      ) {
-        // Cannot invent without OpenCarousel success — break
-        break;
+      // Property 19 / Full Auto A/B: always land at least 2 variants per platform.
+      while (platformVariants.length < 2) {
+        const i = platformVariants.length;
+        platformVariants.push(
+          this.synthesizeLocalVariant({
+            hypothesis,
+            platform,
+            aspectRatio,
+            index: i,
+            cta: options?.cta,
+            hashtags: options?.hashtags ?? [],
+            slidesPerVariant: options?.slidesPerVariant ?? 3,
+            withoutBrandContext,
+            traceabilityBase: options?.traceabilityBase,
+            note: "local A/B filler",
+          }),
+        );
+        errors.push(
+          `Synthesized local A/B variant ${i} for ${platform} (Open Carrusel under-produced)`,
+        );
       }
 
       allVariants.push(...platformVariants);
@@ -576,6 +601,89 @@ export class ContentAgent {
       traceability,
     };
 
+    const validation = validatePostVariant(variant);
+    variant.validationStatus = validation.valid ? "valid" : "invalid";
+    return variant;
+  }
+
+  /**
+   * Offline / failure path: still produce a valid PostVariant so Full Auto can
+   * run Publishing → Analytics → Learning A/B without Open Carrusel.
+   */
+  private synthesizeLocalVariant(args: {
+    hypothesis: Hypothesis;
+    platform: SocialPlatform;
+    aspectRatio: AspectRatio;
+    index: number;
+    cta?: string;
+    hashtags: string[];
+    slidesPerVariant: number;
+    withoutBrandContext: boolean;
+    traceabilityBase?: Partial<TraceabilityChain>;
+    note?: string;
+  }): PostVariant {
+    const {
+      hypothesis,
+      platform,
+      aspectRatio,
+      index,
+      cta,
+      hashtags,
+      slidesPerVariant,
+      withoutBrandContext,
+      traceabilityBase,
+      note,
+    } = args;
+
+    const slides = buildSlides(hypothesis, slidesPerVariant);
+    // Differentiate A/B copy slightly so analytics can pick a winner.
+    const abLabel = index === 0 ? "A" : "B";
+    const hookTwist =
+      index === 0
+        ? hypothesis.hook
+        : `${hypothesis.angle} — ${hypothesis.hook}`.slice(0, 280);
+    if (slides[0]) {
+      slides[0] = {
+        ...slides[0],
+        html: `<div style="padding:24px"><h1>${escapeHtml(hookTwist)}</h1><p>Variant ${abLabel}</p></div>`,
+        hasText: true,
+      };
+    }
+
+    const caption = [
+      hookTwist,
+      hypothesis.coreCopy,
+      cta ?? "",
+      note ? `(${note})` : "",
+    ]
+      .filter((s) => s.trim() !== "")
+      .join("\n\n")
+      .slice(0, 5000);
+
+    const id = randomUUID();
+    const variant: PostVariant = {
+      id,
+      hypothesisId: hypothesis.id,
+      platform,
+      carouselId: `local-${platform}-v${index + 1}-${id.slice(0, 8)}`,
+      slides,
+      caption,
+      hashtags,
+      cta,
+      aspectRatio,
+      brandContextTag: withoutBrandContext
+        ? "generated_without_brand_context"
+        : undefined,
+      regenerationRetryCount: 0,
+      validationStatus: "valid",
+      status: "draft",
+      traceability: {
+        ...emptyTraceability(hypothesis.id, id),
+        ...traceabilityBase,
+        hypothesisId: hypothesis.id,
+        postVariantId: id,
+      },
+    };
     const validation = validatePostVariant(variant);
     variant.validationStatus = validation.valid ? "valid" : "invalid";
     return variant;

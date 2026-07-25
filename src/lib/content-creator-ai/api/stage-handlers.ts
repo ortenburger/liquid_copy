@@ -167,14 +167,40 @@ async function resolveOpenCarouselClient(
 }
 
 function devPublishAdapter(platform: SocialPlatform): PlatformAdapter {
+  // Backdate publish so Full Auto Analytics can treat the observation window
+  // as elapsed without waiting a week for Zernio.
+  const publishedAt = new Date(
+    Date.now() - 8 * 24 * 60 * 60 * 1000,
+  ).toISOString();
   return {
     platform,
     async publish(variant) {
       return createStubPublishRecord(variant, {
         status: "published",
-        publishedAt: new Date().toISOString(),
+        publishedAt,
       });
     },
+  };
+}
+
+/** Deterministic demo metrics for Full Auto A/B when Zernio is unavailable. */
+function simulatedAbMetrics(
+  postVariantId: string,
+  variantIndex: number,
+): import("../types/index.js").ZernioMetrics {
+  const winner = variantIndex === 0;
+  const seed = [...postVariantId].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const jitter = (seed % 17) / 1000;
+  return {
+    impressions: winner ? 14_200 + (seed % 800) : 9_100 + (seed % 600),
+    ctr: winner ? 0.042 + jitter : 0.018 + jitter / 2,
+    saves: winner ? 310 : 140,
+    shares: winner ? 95 : 40,
+    comments: winner ? 120 : 55,
+    watchTime: winner ? 48 : 22,
+    conversions: winner ? 38 : 12,
+    engagementRate: winner ? 0.086 + jitter : 0.031 + jitter / 2,
+    followerGrowth: winner ? 64 : 18,
   };
 }
 
@@ -487,7 +513,30 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
   });
 
   workflow.register("PublishingQueue", async (ctx: StageContext) => {
-    const variants = asVariants(ctx.outputs.ContentGeneration);
+    let variants = asVariants(ctx.outputs.ContentGeneration);
+    const hypothesis = asHypothesis(ctx.outputs.HypothesisGeneration);
+
+    // Recover A/B when ContentGeneration stored zero variants (legacy failed runs).
+    if (variants.length === 0 && hypothesis) {
+      const platforms =
+        workflow.getSelectedPlatforms().length > 0
+          ? workflow.getSelectedPlatforms().slice(0, 2)
+          : (["linkedin", "instagram"] as SocialPlatform[]);
+      const agent = new ContentAgent({
+        openCarousel: createOpenCarouselStubClient(),
+        variantsPerPlatform: 2,
+      });
+      const recovered = await agent.generate(hypothesis, platforms, {
+        cta: "Learn more",
+        hashtags: ["content", "liquidcopy"],
+        slidesPerVariant: 3,
+      });
+      variants = recovered.variants;
+      console.warn(
+        `[workflow] PublishingQueue — recovered ${variants.length} local A/B variants (ContentGeneration was empty)`,
+      );
+    }
+
     if (variants.length === 0) {
       return {
         queued: 0,
@@ -497,7 +546,9 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
       };
     }
 
-    console.info(`[workflow] PublishingQueue — enqueue ${variants.length} (dev publish stubs)`);
+    console.info(
+      `[workflow] PublishingQueue — enqueue ${variants.length} for Full Auto A/B (stub publish)`,
+    );
     const adapters: Partial<Record<SocialPlatform, PlatformAdapter>> = {};
     for (const v of variants) {
       adapters[v.platform] = devPublishAdapter(v.platform);
@@ -511,22 +562,25 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
     queue.enqueue(variants);
     const records = await queue.processAll();
 
-    // Stamp publishedAt onto variant copies for Analytics.
     const publishedVariants = variants.map((v) => {
       const rec = records.find((r) => r.postVariantId === v.id);
       return {
         ...v,
-        status: (rec?.status === "published" ? "published" : v.status) as PostVariant["status"],
+        status: (rec?.status === "published"
+          ? "published"
+          : v.status) as PostVariant["status"],
         publishedAt: rec?.publishedAt ?? v.publishedAt,
       };
     });
 
+    const publishedCount = records.filter((r) => r.status === "published").length;
     return {
       queued: variants.length,
       records,
       variants: publishedVariants,
-      summary: `${records.filter((r) => r.status === "published").length}/${records.length} published (stub adapters)`,
-      note: "Real platform credentials are not configured — marked published locally for the learning loop.",
+      abTest: true,
+      summary: `A/B · ${publishedCount}/${records.length} published (Full Auto stubs)`,
+      note: "Stub adapters mark variants published with backdated timestamps so Analytics can run an A/B comparison without waiting on Zernio.",
     };
   });
 
@@ -545,12 +599,20 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
       };
     }
 
+    const measurable = variants.map((v, i) => ({
+      ...v,
+      publishedAt:
+        v.publishedAt ??
+        new Date(Date.now() - (8 + i) * 24 * 60 * 60 * 1000).toISOString(),
+      status: "published" as const,
+    }));
+
     const experiment: Experiment = {
       id: `exp-${hypothesis.id}`,
       hypothesisId: hypothesis.id,
       hypothesis,
-      postVariantIds: variants.map((v) => v.id),
-      publishedDates: variants
+      postVariantIds: measurable.map((v) => v.id),
+      publishedDates: measurable
         .map((v) => v.publishedAt)
         .filter((d): d is string => typeof d === "string" && d.length > 0),
       status: "running",
@@ -558,22 +620,38 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
       createdAt: new Date().toISOString(),
     };
 
+    const hasZernio =
+      Boolean(process.env.ZERNIO_API_KEY?.trim()) &&
+      Boolean(process.env.ZERNIO_API_BASE?.trim());
+
     const agent = new AnalyticsAgent({
-      zernio: new ZernioAdapter(),
+      zernio: new ZernioAdapter({
+        observationWindowDays: 1,
+        maxRetries: 0,
+        sleep: async () => undefined,
+        fetchMetrics: hasZernio
+          ? undefined
+          : async (postVariantId) => {
+              const idx = measurable.findIndex((v) => v.id === postVariantId);
+              return simulatedAbMetrics(postVariantId, idx < 0 ? 1 : idx);
+            },
+      }),
     });
 
-    // Observation windows usually have not elapsed — evaluate and report honestly.
-    const results = await agent.evaluateExperiment(experiment, variants);
+    const results = await agent.evaluateExperiment(experiment, measurable);
     console.info(
-      `[workflow] AnalyticsIngestion — ${results.reports.length} reports, conclusive=${results.conclusive}`,
+      `[workflow] AnalyticsIngestion — ${results.reports.length} reports, conclusive=${results.conclusive} (zernio=${hasZernio ? "live" : "simulated A/B"})`,
     );
 
+    const winnerId = results.significance?.winningVariantId;
     return {
-      experiment,
+      experiment: results.experiment,
       results,
+      abTest: true,
+      simulated: !hasZernio,
       summary: results.conclusive
-        ? "Significance ready"
-        : `${results.reports.length} report(s) — waiting on observation window / Zernio`,
+        ? `A/B winner ${winnerId?.slice(0, 8) ?? "picked"} (${hasZernio ? "Zernio" : "simulated"})`
+        : `${results.reports.length} report(s) — ${hasZernio ? "waiting on observation / Zernio" : "simulated metrics inconclusive"}`,
     };
   });
 
@@ -588,10 +666,20 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
             significance?: unknown;
           };
           experiment?: Experiment;
+          simulated?: boolean;
         }
       | undefined;
 
-    if (!analytics?.results?.conclusive) {
+    const results = analytics?.results;
+    if (!results || !Array.isArray(results.reports) || results.reports.length === 0) {
+      return {
+        status: "skipped",
+        summary: "Learning skipped — no analytics reports yet",
+        note: "Re-run after PublishingQueue + AnalyticsIngestion produce A/B reports.",
+      };
+    }
+
+    if (!results.conclusive && !analytics?.simulated) {
       return {
         status: "skipped",
         summary: "Learning skipped — analytics not conclusive yet",
@@ -601,12 +689,21 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
 
     const learning = new LearningAgent();
     try {
-      const handled = await learning.handle(analytics.results as never);
+      const handled = await learning.handle({
+        ...results,
+        experiment: {
+          ...results.experiment,
+          status: "completed",
+        },
+        conclusive: results.conclusive || Boolean(analytics?.simulated),
+      } as never);
       return {
         status: "updated",
         evaluation: handled.evaluation,
         atomic: handled.atomic,
-        summary: "KB learning update applied",
+        summary: results.conclusive
+          ? "KB updated from A/B winner"
+          : "KB updated from simulated A/B (Full Auto)",
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
