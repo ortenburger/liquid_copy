@@ -1,7 +1,7 @@
 import { eventBus } from "../orchestration/event-bus.js";
 import type { KBEntityType, RetrievalScope } from "../types/enums.js";
 import type { KBDocument } from "../types/index.js";
-import { readKBEntity } from "../kb/storage.js";
+import { listKBEntities, readKBEntity } from "../kb/storage.js";
 import { indexDocuments } from "./vectorstore.js";
 
 const REINDEX_DEADLINE_MS = 60_000;
@@ -32,6 +32,28 @@ export interface ReindexHandle {
  * Subscribe to `kb.updated` and re-index affected documents within 60 seconds.
  * Requirement 14.4.
  */
+/** Index every on-disk KB entity into the in-memory vector store (startup). */
+export async function reindexAllKBEntities(options?: {
+  storagePath?: string;
+}): Promise<number> {
+  const entities = await listKBEntities(options?.storagePath);
+  const docs: KBDocument[] = [];
+  for (const entity of entities) {
+    const content = await readKBEntity(entity.entityId, options?.storagePath);
+    if (content == null) continue;
+    docs.push({
+      id: `${entity.entityId}_v${entity.latestVersion}`,
+      entityId: entity.entityId,
+      entityType: entity.entityType,
+      scope: scopeForEntityType(entity.entityType),
+      content,
+      metadata: { version: entity.latestVersion },
+    });
+  }
+  if (docs.length > 0) await indexDocuments(docs);
+  return docs.length;
+}
+
 export function startRAGReindexListener(options?: {
   /** Delay before reindex (default 0 for immediate; max 60s). */
   delayMs?: number;

@@ -1,0 +1,124 @@
+.parsed-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+}
+
+.parsed-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.parsed-heading strong {
+  font: var(--text-body-bold);
+}
+
+.parsed-lead {
+  margin: 0;
+  color: var(--on-surface-variant);
+  line-height: 1.5;
+}
+
+.parsed-muted {
+  font: var(--text-label-mono);
+  letter-spacing: 0.03em;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  margin-right: var(--space-xs);
+}
+
+.parsed-mono {
+  font: var(--text-label-mono);
+  letter-spacing: 0.02em;
+}
+
+.parsed-plain {
+  margin: 0;
+  color: var(--on-surface-variant);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.parsed-dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.parsed-row {
+  display: grid;
+  gap: 4px;
+}
+
+.parsed-row dt {
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+
+.parsed-row dd {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.parsed-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.parsed-weeks,
+.parsed-hyp-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.parsed-weeks li,
+.parsed-hyp {
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--outline-hairline);
+}
+
+.parsed-weeks li:first-child,
+.parsed-hyp:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.parsed-week-label {
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-surface);
+}
+
+.parsed-weeks p,
+.parsed-hyp p {
+  margin: 4px 0 0;
+  color: var(--on-surface-variant);
+  line-height: 1.45;
+}
+
+.parsed-nested {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.parsed-nested > .parsed-block {
+  padding: var(--space-sm);
+  border: 1px solid var(--outline-hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-container) 70%, transparent);
+}

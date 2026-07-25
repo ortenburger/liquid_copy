@@ -23,7 +23,7 @@
 .shell-brand {
   display: inline-flex;
   align-items: center;
-  margin-right: auto;
+  flex-shrink: 0;
 }
 
 .shell-brand-img {
@@ -35,6 +35,7 @@
 .shell-nav {
   display: none;
   gap: var(--space-xs);
+  align-items: center;
 }
 
 .shell-link {
@@ -45,6 +46,19 @@
   text-transform: uppercase;
   color: var(--on-surface-variant);
   transition: background var(--duration-fast) var(--ease-spring);
+}
+
+.shell-link--icon {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  line-height: 0;
+}
+
+.shell-gear {
+  display: block;
 }
 
 .shell-link:hover {
@@ -60,6 +74,7 @@
 .shell-menu-btn {
   display: inline-flex;
   margin-left: auto;
+  flex-shrink: 0;
   padding: 8px 12px;
   border: 1px solid var(--outline-hairline);
   border-radius: var(--radius);
@@ -97,6 +112,8 @@
 
   .shell-nav {
     display: flex;
+    flex: 1;
+    min-width: 0;
   }
 
   .shell-exit {
@@ -117,5 +134,10 @@
     border: 1px solid var(--outline-hairline);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-float);
+  }
+
+  .shell-link--icon {
+    margin-left: 0;
+    align-self: flex-start;
   }
 }

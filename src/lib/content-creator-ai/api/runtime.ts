@@ -7,7 +7,12 @@
 import type { SocialPlatform, RetrievalScope } from "../types/enums.js";
 import type { RAGPassage } from "../types/index.js";
 import { semanticSearch } from "../rag/vectorstore.js";
-import { readKBEntity, writeKBEntity } from "../kb/storage.js";
+import {
+  listKBEntities,
+  readKBEntity,
+  writeKBEntity,
+  type KBEntitySummary,
+} from "../kb/storage.js";
 import { parseFromMarkdown } from "../kb/markdown.js";
 import { CheckpointManager } from "../orchestration/checkpoints.js";
 import { WorkflowEngine } from "../orchestration/workflow-engine.js";
@@ -277,6 +282,14 @@ export async function readKnowledgeBase(
     markdown,
     parsed: parseFromMarkdown(markdown).payload,
   };
+}
+
+export async function listKnowledgeBase(): Promise<{
+  entities: KBEntitySummary[];
+  count: number;
+}> {
+  const entities = await listKBEntities();
+  return { entities, count: entities.length };
 }
 
 export interface KBWriteRequest {

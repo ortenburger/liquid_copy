@@ -19,6 +19,8 @@ export interface LLMSettings {
 export interface AppSettings {
   /** Demo fixtures vs live API / integrations. */
   dataMode: DataMode;
+  /** Reduce workspace nav to Chat-first Simple UI. */
+  simpleUi: boolean;
   /** Liquid Copy agent API origin when dataMode is real. */
   apiBaseUrl: string;
   firecrawlApiKey: string;
@@ -90,6 +92,7 @@ export const DEFAULT_API_BASE_URL = "http://localhost:8787";
 export function defaultSettings(): AppSettings {
   return {
     dataMode: "simulation",
+    simpleUi: false,
     apiBaseUrl:
       (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
         /\/$/,
@@ -130,6 +133,7 @@ export function loadSettings(): AppSettings {
         ...base,
         ...parsed,
         dataMode: parsed.dataMode === "real" ? "real" : "simulation",
+        simpleUi: parsed.simpleUi === true,
         apiBaseUrl: String(parsed.apiBaseUrl ?? base.apiBaseUrl).replace(/\/$/, ""),
         firecrawlApiKey: String(parsed.firecrawlApiKey ?? ""),
         zernioApiKey: String(parsed.zernioApiKey ?? ""),

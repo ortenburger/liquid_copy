@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
@@ -23,6 +23,7 @@ import "../../components/ui/Input.css";
 import "../../components/ui/Toggle.css";
 
 export function SettingsPage() {
+  const navigate = useNavigate();
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -38,6 +39,7 @@ export function SettingsPage() {
   const llm = settings.llm;
   const preset = PROVIDER_PRESETS[llm.provider];
   const realMode = settings.dataMode === "real";
+  const simpleUi = settings.simpleUi;
 
   useEffect(() => {
     if (llm.provider !== "ollama") {
@@ -181,6 +183,28 @@ export function SettingsPage() {
       ) : (
         <p className="panel-meta">Unsaved changes</p>
       )}
+
+      {/* Interface */}
+      <section className="panel settings-panel">
+        <div className="panel-head">
+          <h2 className="panel-title">Interface</h2>
+          <Badge tone={simpleUi ? "active" : "idle"}>
+            {simpleUi ? "Simple" : "Full"}
+          </Badge>
+        </div>
+        <Toggle
+          checked={simpleUi}
+          onChange={(on) => {
+            const next = { ...settings, simpleUi: on };
+            setSettings(next);
+            saveSettings(next);
+            setSavedAt(new Date().toLocaleTimeString());
+            navigate("/app", { replace: true });
+          }}
+          label="Simple UI"
+          description="Reduce navigation to Chat (agent), Organization, Testing plan, Analytics, and Settings."
+        />
+      </section>
 
       {/* Data mode */}
       <section className="panel settings-panel">

@@ -323,3 +323,37 @@ export async function nextExperimentVersion(
 export function resolveKBStoragePath(override?: string): string {
   return getStorageRoot(override);
 }
+
+export interface KBEntitySummary {
+  entityId: string;
+  entityType: KBEntityType;
+  latestVersion: number;
+  updatedAt?: string;
+}
+
+/**
+ * List every entity directory that has a meta file under the KB storage root.
+ */
+export async function listKBEntities(
+  storagePath?: string,
+): Promise<KBEntitySummary[]> {
+  const root = getStorageRoot(storagePath);
+  if (!existsSync(root)) return [];
+  const entries = readdirSync(root, { withFileTypes: true });
+  const out: KBEntitySummary[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const meta = readMeta(entityDir(root, entry.name), entry.name);
+    if (!meta) continue;
+    const latest = meta.versions
+      .slice()
+      .sort((a, b) => b.versionNumber - a.versionNumber)[0];
+    out.push({
+      entityId: meta.entityId,
+      entityType: meta.entityType,
+      latestVersion: meta.latestVersion,
+      updatedAt: latest?.timestamp,
+    });
+  }
+  return out.sort((a, b) => a.entityId.localeCompare(b.entityId));
+}

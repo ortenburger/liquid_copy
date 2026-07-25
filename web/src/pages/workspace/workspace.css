@@ -179,6 +179,31 @@
   font: var(--text-body);
 }
 
+.empty-state {
+  color: var(--on-surface-variant);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.empty-state a {
+  color: var(--secondary);
+  text-decoration: underline;
+}
+
+.mono-block {
+  margin: 0;
+  padding: var(--space-sm);
+  border-radius: var(--radius);
+  background: var(--surface-container);
+  font: var(--text-label-mono);
+  letter-spacing: 0.02em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--on-surface-variant);
+  max-height: 240px;
+  overflow: auto;
+}
+
 .error-banner {
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius);

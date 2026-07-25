@@ -20,13 +20,17 @@ export function KnowledgePage() {
   const [ingestMsg, setIngestMsg] = useState<string | null>(null);
   const apiBase = getApiBaseUrl();
 
+  const [answer, setAnswer] = useState<string | null>(null);
+
   async function onSearch(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setAnswer(null);
     try {
-      const passages = await api.search(query);
-      setResults(passages);
+      const result = await api.ragAsk(query);
+      setResults(result.passages);
+      setAnswer(result.answer);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -109,16 +113,29 @@ export function KnowledgePage() {
 
       <Progress
         active={busy || ingestBusy}
-        label="Talking to the knowledge layer"
+        label="RAG retrieve → Ollama answer"
       />
       {error ? <p className="error-banner">{error}</p> : null}
 
-      {results.length === 0 && !busy ? (
+      {answer ? (
+        <div className="panel">
+          <div className="panel-head">
+            <h2 className="panel-title">Answer</h2>
+            <span className="panel-meta">grounded in RAG</span>
+          </div>
+          <p className="list-row-body" style={{ whiteSpace: "pre-wrap" }}>
+            {answer}
+            {busy ? <StreamingCaret /> : null}
+          </p>
+        </div>
+      ) : null}
+
+      {results.length === 0 && !busy && !answer ? (
         <p className="empty-hint">
           Query the knowledge base
           <StreamingCaret />
         </p>
-      ) : (
+      ) : results.length > 0 ? (
         <ul className="list-stack">
           {results.map((passage) => (
             <li
@@ -138,7 +155,7 @@ export function KnowledgePage() {
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
     </div>
   );
 }

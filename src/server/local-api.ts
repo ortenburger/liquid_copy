@@ -28,6 +28,10 @@ import { POST as checkpointPost } from "@/app/api/content-creator-ai/checkpoints
 import { POST as searchPost } from "@/app/api/content-creator-ai/search/route.js";
 import { GET as traceabilityGet } from "@/app/api/content-creator-ai/traceability/[variantId]/route.js";
 import { applyRequestSecrets } from "@/lib/content-creator-ai/api/runtime.js";
+import {
+  reindexAllKBEntities,
+  startRAGReindexListener,
+} from "@/lib/content-creator-ai/rag/reindex.js";
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -264,4 +268,16 @@ server.listen(PORT, HOST, () => {
       "[liquid-copy-api] LLM_BASE_URL unset — heuristics until Settings syncs LLM config",
     );
   }
+
+  startRAGReindexListener({ delayMs: 0 });
+  void reindexAllKBEntities()
+    .then((n) => {
+      console.log(`[liquid-copy-api] RAG indexed ${n} KB document(s)`);
+    })
+    .catch((err) => {
+      console.warn(
+        "[liquid-copy-api] RAG startup reindex failed:",
+        err instanceof Error ? err.message : err,
+      );
+    });
 });

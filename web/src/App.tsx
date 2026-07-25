@@ -8,6 +8,16 @@ import { KnowledgePage } from "./pages/workspace/Knowledge";
 import { PlatformsPage } from "./pages/workspace/Platforms";
 import { SettingsPage } from "./pages/workspace/Settings";
 import { CarouselsPage } from "./pages/workspace/Carousels";
+import { TestingPlanPage } from "./pages/workspace/TestingPlan";
+import { OrganizationPage } from "./pages/workspace/Organization";
+import { ChatPage } from "./pages/workspace/Chat";
+import { AnalyticsPage } from "./pages/workspace/Analytics";
+import { useSimpleUi } from "./lib/hooks";
+
+function WorkspaceHome() {
+  const simpleUi = useSimpleUi();
+  return simpleUi ? <ChatPage /> : <OverviewPage />;
+}
 
 export default function App() {
   return (
@@ -15,13 +25,18 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/app" element={<WorkspaceShell />}>
-          <Route index element={<OverviewPage />} />
+          <Route index element={<WorkspaceHome />} />
           <Route path="checkpoints" element={<CheckpointsPage />} />
           <Route path="experiments" element={<ExperimentsPage />} />
           <Route path="knowledge" element={<KnowledgePage />} />
           <Route path="platforms" element={<PlatformsPage />} />
           <Route path="carousels" element={<CarouselsPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="organization" element={<OrganizationPage />} />
+          <Route path="testing-plan" element={<TestingPlanPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="approvals" element={<Navigate to="/app" replace />} />
+          <Route path="insights" element={<Navigate to="/app" replace />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

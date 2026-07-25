@@ -223,6 +223,7 @@ export {
   resetRuntime,
   searchKnowledge,
   readKnowledgeBase,
+  listKnowledgeBase,
   updateKnowledgeBase,
   updatePlatformSelection,
   workflowStatus,

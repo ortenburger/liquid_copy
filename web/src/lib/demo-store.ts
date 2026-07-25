@@ -1,12 +1,33 @@
-import { DEMO_EXPERIMENTS, DEMO_PASSAGES } from "../data/demo";
+import {
+  DEMO_ANALYTICS,
+  DEMO_EXPERIMENTS,
+  DEMO_HYPOTHESES,
+  DEMO_KB_ENTITIES,
+  DEMO_KB_MARKDOWN,
+  DEMO_ORG_GOAL,
+  DEMO_ORG_PROFILE,
+  DEMO_PASSAGES,
+  DEMO_PLAN_HISTORY,
+  DEMO_ROADMAP,
+} from "../data/demo";
 import {
   CHECKPOINT_STAGES,
   WORKFLOW_STAGES,
+  type AnalyticsSummary,
   type ApprovalCheckpointStage,
   type CheckpointRecord,
   type ExperimentCard,
+  type HypothesisCard,
+  type InsightPiece,
+  type KBDocumentView,
+  type KBEntitySummary,
   type OperatingMode,
+  type OrgGoal,
+  type OrgProfile,
+  type PlanChangeRecord,
   type RAGPassage,
+  type RetrievalScope,
+  type RoadmapSummary,
   type SocialPlatform,
   type StageRecord,
   type WorkflowStatus,
@@ -34,7 +55,15 @@ function initialCheckpoints(): CheckpointRecord[] {
         stage,
         enabled: true,
         status: "waiting",
-        pendingOutput: "4-week roadmap with weekly hypothesis slots ready for review.",
+        pendingOutput: JSON.stringify(DEMO_ROADMAP, null, 2),
+      };
+    }
+    if (stage === "HypothesisReview") {
+      return {
+        stage,
+        enabled: true,
+        status: "waiting",
+        pendingOutput: JSON.stringify(DEMO_HYPOTHESES.slice(0, 2), null, 2),
       };
     }
     if (stage === "ContextReview" || stage === "GoalReview" || stage === "AudienceReview") {
@@ -173,6 +202,98 @@ class DemoStore {
 
   listExperiments(): ExperimentCard[] {
     return [...this.experiments];
+  }
+
+  getRoadmapSummary(): RoadmapSummary {
+    return DEMO_ROADMAP;
+  }
+
+  getHypotheses(): HypothesisCard[] {
+    return [...DEMO_HYPOTHESES];
+  }
+
+  getPlanHistory(): PlanChangeRecord[] {
+    return [...DEMO_PLAN_HISTORY];
+  }
+
+  getTopContent(limit = 5): InsightPiece[] {
+    const rank: Record<ExperimentCard["status"], number> = {
+      won: 0,
+      published: 1,
+      measuring: 2,
+      queued: 3,
+      draft: 4,
+      failed: 5,
+    };
+    return [...this.experiments]
+      .sort((a, b) => rank[a.status] - rank[b.status])
+      .slice(0, limit)
+      .map((e) => ({
+        id: e.id,
+        title: e.title,
+        hook: e.hook,
+        platform: e.platform,
+        status: e.status,
+      }));
+  }
+
+  /** Reset roadmap + hypotheses to waiting review (Simple UI kickstart). */
+  kickstartPlan(): WorkflowStatus {
+    this.stages = initialStages();
+    this.checkpoints = initialCheckpoints();
+    this.notify();
+    return this.status();
+  }
+
+  getOrgProfile(): OrgProfile {
+    return { ...DEMO_ORG_PROFILE, values: [...DEMO_ORG_PROFILE.values] };
+  }
+
+  getOrgGoal(): OrgGoal {
+    return {
+      ...DEMO_ORG_GOAL,
+      successMetrics: DEMO_ORG_GOAL.successMetrics.map((m) => ({ ...m })),
+    };
+  }
+
+  listKBEntities(): KBEntitySummary[] {
+    return DEMO_KB_ENTITIES.map((e) => ({ ...e }));
+  }
+
+  readKBEntity(entityId: string): KBDocumentView {
+    const meta = DEMO_KB_ENTITIES.find((e) => e.entityId === entityId);
+    const markdown = DEMO_KB_MARKDOWN[entityId];
+    if (!markdown) return { entityId, found: false };
+    return {
+      entityId,
+      found: true,
+      markdown,
+      entityType: meta?.entityType,
+      latestVersion: meta?.latestVersion,
+      updatedAt: meta?.updatedAt,
+    };
+  }
+
+  getAnalytics(): AnalyticsSummary {
+    return {
+      ...DEMO_ANALYTICS,
+      rows: DEMO_ANALYTICS.rows.map((r) => ({ ...r })),
+    };
+  }
+
+  searchScoped(query: string, scope?: RetrievalScope, limit = 10): RAGPassage[] {
+    const q = query.trim().toLowerCase();
+    return DEMO_PASSAGES.filter((p) => {
+      if (scope && p.scope !== scope) return false;
+      if (!q) return true;
+      return (
+        p.content.toLowerCase().includes(q) ||
+        p.scope.toLowerCase().includes(q) ||
+        p.sourceDoc.toLowerCase().includes(q)
+      );
+    })
+      .slice(0, Math.min(limit, 10))
+      .sort((a, b) => b.similarityScore - a.similarityScore);
   }
 }
 

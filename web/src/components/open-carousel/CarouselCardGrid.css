@@ -1,0 +1,74 @@
+.oc-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-md);
+}
+
+.oc-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  width: 100%;
+  margin: 0;
+  padding: var(--space-md);
+  text-align: left;
+  border: 1px solid var(--outline-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-container-lowest);
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-spring),
+    box-shadow var(--duration-fast) var(--ease-spring),
+    transform var(--duration-fast) var(--ease-spring);
+}
+
+.oc-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--outline-hairline));
+  box-shadow: var(--shadow-float);
+  transform: translateY(-2px);
+}
+
+.oc-card-preview {
+  height: 112px;
+  border-radius: var(--radius);
+  background: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.oc-card-slide {
+  width: 100%;
+  height: 100%;
+}
+
+.oc-card-preview-empty {
+  font-size: 1.75rem;
+  color: var(--on-surface-variant);
+  opacity: 0.35;
+}
+
+.oc-card-title {
+  margin: 0;
+  font: var(--text-title-sm, 600 0.875rem/1.3 var(--font-sans));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-card:hover .oc-card-title {
+  color: var(--primary);
+}
+
+.oc-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font: var(--text-label-mono);
+  letter-spacing: 0.03em;
+  color: var(--on-surface-variant);
+}

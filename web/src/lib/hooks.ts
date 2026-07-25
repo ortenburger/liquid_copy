@@ -7,7 +7,7 @@ import {
   subscribeLiveStatus,
 } from "./api";
 import { demoStore } from "./demo-store";
-import { isDemoWorkspace, subscribeSettings } from "./settings";
+import { isDemoWorkspace, loadSettings, subscribeSettings } from "./settings";
 import type { WorkflowStatus } from "./types";
 
 function getDemoSnapshot(): WorkflowStatus {
@@ -16,6 +16,10 @@ function getDemoSnapshot(): WorkflowStatus {
 
 function getDemoFlag(): boolean {
   return isDemoWorkspace();
+}
+
+function getSimpleUiFlag(): boolean {
+  return loadSettings().simpleUi === true;
 }
 
 /** Real mode never falls back to demo fixtures. */
@@ -35,6 +39,15 @@ export function useDataMode(): { simulation: boolean } {
     getDemoFlag,
   );
   return { simulation };
+}
+
+/** Re-render when Simple UI mode toggles. */
+export function useSimpleUi(): boolean {
+  return useSyncExternalStore(
+    subscribeSettings,
+    getSimpleUiFlag,
+    getSimpleUiFlag,
+  );
 }
 
 /** Live workflow status from the demo store or the local API. */

@@ -1,10 +1,12 @@
 /**
- * GET  /api/content-creator-ai/knowledge-base?entityId=…  — read a KB entity.
- * PUT  /api/content-creator-ai/knowledge-base             — versioned write.
+ * GET  /api/content-creator-ai/knowledge-base              — list KB entities
+ * GET  /api/content-creator-ai/knowledge-base?entityId=…  — read a KB entity
+ * PUT  /api/content-creator-ai/knowledge-base             — versioned write
  * Requirements 2.1, 2.2, 2.4.
  */
 import {
   readKnowledgeBase,
+  listKnowledgeBase,
   updateKnowledgeBase,
   jsonResponse,
   errorResponse,
@@ -23,7 +25,11 @@ const SCOPE_SECTION: Record<RetrievalScope, string> = {
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const entityId = url.searchParams.get("entityId");
-  if (!entityId) return errorResponse("entityId query parameter is required");
+
+  // No entityId → catalog of markdown entities in the KB store.
+  if (!entityId) {
+    return jsonResponse(await listKnowledgeBase());
+  }
 
   const scope = url.searchParams.get("scope") as RetrievalScope | null;
   if (scope && !(scope in SCOPE_SECTION)) {
@@ -43,6 +49,7 @@ export async function GET(request: Request): Promise<Response> {
       found: true,
       scope,
       section: result.parsed[key],
+      markdown: result.markdown,
     });
   }
 
