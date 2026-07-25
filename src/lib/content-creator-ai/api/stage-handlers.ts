@@ -17,6 +17,7 @@ import {
   listKBEntityIds,
   readKBEntity,
   readKBEntityType,
+  writeKBEntity,
 } from "../kb/storage.js";
 import { parseFromMarkdown } from "../kb/markdown.js";
 import { getLLMClient } from "../integrations/llm.js";
@@ -205,9 +206,9 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
 
   workflow.register("GoalGeneration", async (ctx: StageContext) => {
     console.info("[workflow] GoalGeneration — LLM via Ollama/Claude fallback");
+    const loaded = await loadCompanyIdentityFromKB();
     const identity =
-      asIdentity(ctx.outputs.ContextIngestion) ??
-      (await loadCompanyIdentityFromKB())?.identity;
+      asIdentity(ctx.outputs.ContextIngestion) ?? loaded?.identity;
     if (!identity) {
       throw new Error("GoalGeneration needs company context from ContextIngestion / KB.");
     }
@@ -217,6 +218,8 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
       identity,
       targetPlatform: platforms[0],
       llm: llm(),
+      // Full Auto: infer industry / business objectives when Firecrawl left them empty.
+      autoEnrichContext: true,
     });
     if (!generated.goal) {
       throw new Error(
@@ -224,6 +227,30 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
           generated.contextSufficiency.message ??
           "Could not generate a marketing goal",
       );
+    }
+
+    // Persist enriched industry/objectives back into the KB company record.
+    if (generated.identity && loaded?.entityId) {
+      try {
+        await writeKBEntity({
+          entityId: loaded.entityId,
+          entityType: "company_identity",
+          content: {
+            companyIdentity: {
+              ...generated.identity,
+              id: generated.identity.id || loaded.entityId,
+            },
+          },
+          author: "system",
+          emitEvent: true,
+        });
+      } catch (err) {
+        console.warn(
+          `[workflow] GoalGeneration — could not persist enriched identity: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
 
     const confirmed = confirmGoal(generated.goal, "accepted");
@@ -237,6 +264,7 @@ export function registerWorkflowStageHandlers(deps: StageHandlerDeps): void {
     );
     return {
       goal: confirmed.goal,
+      identity: generated.identity,
       warnings: generated.warnings,
       contextTag: generated.contextTag,
       summary: confirmed.goal.primaryObjective,
