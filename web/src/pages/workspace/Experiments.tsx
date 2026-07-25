@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Card } from "../../components/ui/Card";
 import { api } from "../../lib/api";
+import { useDataMode } from "../../lib/hooks";
 import type { ExperimentCard } from "../../lib/types";
 import "./workspace.css";
 
@@ -13,11 +15,12 @@ function toneFor(status: ExperimentCard["status"]) {
 }
 
 export function ExperimentsPage() {
+  const { simulation } = useDataMode();
   const [items, setItems] = useState<ExperimentCard[]>([]);
 
   useEffect(() => {
     void api.listExperiments().then(setItems);
-  }, []);
+  }, [simulation]);
 
   return (
     <div className="page stagger-in">
@@ -27,6 +30,14 @@ export function ExperimentsPage() {
           <h1 className="page-title">Experiments</h1>
         </div>
       </header>
+
+      {!simulation && items.length === 0 ? (
+        <p className="empty-hint">
+          No live experiments yet — run the workflow and publish variants to
+          populate this feed.{" "}
+          <Link to="/app">Back to Overview</Link>
+        </p>
+      ) : null}
 
       <div className="card-grid">
         {items.map((exp) => (

@@ -113,7 +113,7 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider",
+    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider",
   "Access-Control-Expose-Headers": "Content-Type",
 };
 

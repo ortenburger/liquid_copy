@@ -3,7 +3,12 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
-import { useAsyncAction, useDataMode, useWorkflowStatus } from "../../lib/hooks";
+import {
+  useAsyncAction,
+  useDataMode,
+  useLiveStatusError,
+  useWorkflowStatus,
+} from "../../lib/hooks";
 import { loadSettings } from "../../lib/settings";
 import type { StageStatus } from "../../lib/types";
 import "./workspace.css";
@@ -22,12 +27,15 @@ function labelStatus(status: StageStatus) {
 
 export function OverviewPage() {
   const status = useWorkflowStatus();
+  const liveError = useLiveStatusError();
   const { busy, error, run } = useAsyncAction();
   const { simulation } = useDataMode();
   const processing = status.stages.some(
     (s) => s.status === "in_progress" || s.status === "awaiting_approval",
   );
   const llm = loadSettings().llm;
+  const allPending =
+    !simulation && status.stages.every((s) => s.status === "pending");
 
   return (
     <div className="page stagger-in">
@@ -81,7 +89,20 @@ export function OverviewPage() {
         </p>
       )}
 
+      {liveError ? (
+        <p className="error-banner">
+          API unreachable: {liveError}. Is <code>npm run api:dev</code> running
+          on the URL in Settings?
+        </p>
+      ) : null}
       {error ? <p className="error-banner">{error}</p> : null}
+
+      {!simulation && allPending && !liveError ? (
+        <p className="info-banner">
+          Live pipeline is idle — press <strong>Run workflow</strong> to advance
+          from ContextIngestion.
+        </p>
+      ) : null}
 
       <Progress active={processing} label="Agents advancing the experiment loop" />
 

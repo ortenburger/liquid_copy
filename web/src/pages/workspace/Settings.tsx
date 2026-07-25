@@ -186,9 +186,17 @@ export function SettingsPage() {
         </div>
         <Toggle
           checked={realMode}
-          onChange={(on) => patch({ dataMode: on ? "real" : "simulation" })}
+          onChange={(on) => {
+            const next = {
+              ...settings,
+              dataMode: on ? ("real" as const) : ("simulation" as const),
+            };
+            setSettings(next);
+            saveSettings(next);
+            setSavedAt(new Date().toLocaleTimeString());
+          }}
           label="Use real data"
-          description="Off = in-browser demo fixtures. On = call the Liquid Copy API base URL below (agents, KB, workflow)."
+          description="Off = in-browser demo fixtures. On = call the Liquid Copy API base URL below (agents, KB, workflow). Saves immediately."
         />
         <div className="settings-fields">
           <Input
@@ -242,6 +250,35 @@ export function SettingsPage() {
           embedded, and by Context Agent on a live API. Pass the same key into
           the Open Carrusel process as <code>FIRECRAWL_API_KEY</code> if you run
           the studio alone.
+        </p>
+      </section>
+
+      {/* Zernio */}
+      <section className="panel settings-panel">
+        <div className="panel-head">
+          <h2 className="panel-title">Zernio</h2>
+          <span className="panel-meta">Analytics &amp; experiments</span>
+        </div>
+        <div className="settings-fields">
+          <Input
+            label="Zernio API key"
+            type="password"
+            autoComplete="off"
+            value={settings.zernioApiKey}
+            onChange={(e) => patch({ zernioApiKey: e.target.value })}
+            placeholder="zn-…"
+          />
+          <Input
+            label="Zernio API base URL"
+            value={settings.zernioApiBaseUrl}
+            onChange={(e) => patch({ zernioApiBaseUrl: e.target.value })}
+            placeholder="https://api.zernio.com"
+          />
+        </div>
+        <p className="settings-note">
+          Used by Analytics Agent to poll post metrics after the observation
+          window. Synced to the local API as <code>ZERNIO_API_KEY</code> /{" "}
+          <code>ZERNIO_API_BASE</code> when you Save in real-data mode.
         </p>
       </section>
 

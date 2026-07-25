@@ -11,11 +11,29 @@ import type {
   WorkflowStage,
   WorkflowStatus,
 } from "./types";
-import { WORKFLOW_STAGES } from "./types";
+import { CHECKPOINT_STAGES, WORKFLOW_STAGES } from "./types";
 
 function resolveLiveBase(): string | undefined {
   if (isDemoWorkspace()) return undefined;
   return getApiBaseUrl();
+}
+
+function emptyWorkflowStatus(): WorkflowStatus {
+  return {
+    mode: "Human_In_The_Loop_Mode",
+    currentStage: "ContextIngestion",
+    stages: WORKFLOW_STAGES.map((stage) => ({
+      stage,
+      status: "pending" as const,
+      approvedByUser: false,
+    })),
+    checkpoints: CHECKPOINT_STAGES.map((stage) => ({
+      stage,
+      enabled: true,
+      status: "idle" as const,
+    })),
+    platforms: [],
+  };
 }
 
 function authHeaders(): HeadersInit {
@@ -25,6 +43,12 @@ function authHeaders(): HeadersInit {
   };
   if (s.firecrawlApiKey.trim()) {
     headers["X-Firecrawl-Api-Key"] = s.firecrawlApiKey.trim();
+  }
+  if (s.zernioApiKey.trim()) {
+    headers["X-Zernio-Api-Key"] = s.zernioApiKey.trim();
+  }
+  if (s.zernioApiBaseUrl.trim()) {
+    headers["X-Zernio-Api-Base"] = s.zernioApiBaseUrl.trim();
   }
   if (s.llm.baseUrl.trim()) headers["X-LLM-Base-Url"] = s.llm.baseUrl.trim();
   if (s.llm.model.trim()) headers["X-LLM-Model"] = s.llm.model.trim();
@@ -136,6 +160,7 @@ function mapPassages(raw: unknown): RAGPassage[] {
 
 const statusListeners = new Set<() => void>();
 let liveStatusCache: WorkflowStatus | null = null;
+let liveStatusError: string | null = null;
 
 export function subscribeLiveStatus(listener: () => void): () => void {
   statusListeners.add(listener);
@@ -151,12 +176,28 @@ async function refreshLiveStatus(): Promise<WorkflowStatus> {
     "/api/content-creator-ai/workflow/status",
   );
   liveStatusCache = mapWorkflowStatus(raw);
+  liveStatusError = null;
   notifyLiveStatus();
   return liveStatusCache;
 }
 
 export function getLiveStatusSnapshot(): WorkflowStatus | null {
   return liveStatusCache;
+}
+
+/** Empty pending pipeline — used instead of demo fixtures in real mode. */
+export function getEmptyLiveStatus(): WorkflowStatus {
+  return emptyWorkflowStatus();
+}
+
+export function getLiveStatusError(): string | null {
+  return liveStatusError;
+}
+
+export function clearLiveStatus(): void {
+  liveStatusCache = null;
+  liveStatusError = null;
+  notifyLiveStatus();
 }
 
 export const api = {
@@ -171,6 +212,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({
         firecrawlApiKey: s.firecrawlApiKey || undefined,
+        zernioApiKey: s.zernioApiKey || undefined,
+        zernioApiBaseUrl: s.zernioApiBaseUrl || undefined,
         llm: s.llm,
       }),
     });
@@ -182,7 +225,15 @@ export const api = {
   },
 
   async getWorkflowStatus(): Promise<WorkflowStatus> {
-    if (useLive()) return refreshLiveStatus();
+    if (useLive()) {
+      try {
+        return await refreshLiveStatus();
+      } catch (e) {
+        liveStatusError = e instanceof Error ? e.message : String(e);
+        notifyLiveStatus();
+        throw e;
+      }
+    }
     return demoStore.status();
   },
 
@@ -192,7 +243,10 @@ export const api = {
         "/api/content-creator-ai/workflow/run",
         { method: "POST", body: "{}" },
       );
-      liveStatusCache = mapWorkflowStatus(result.status ?? result);
+      liveStatusCache = mapWorkflowStatus(
+        (result.status ?? result) as Record<string, unknown>,
+      );
+      liveStatusError = null;
       notifyLiveStatus();
       return liveStatusCache;
     }
@@ -205,7 +259,10 @@ export const api = {
         "/api/content-creator-ai/workflow/status",
         { method: "PUT", body: JSON.stringify({ mode }) },
       );
-      liveStatusCache = mapWorkflowStatus(result.status ?? result);
+      liveStatusCache = mapWorkflowStatus(
+        (result.status ?? result) as Record<string, unknown>,
+      );
+      liveStatusError = null;
       notifyLiveStatus();
       return liveStatusCache;
     }
@@ -271,6 +328,7 @@ export const api = {
   },
 
   async listExperiments(): Promise<ExperimentCard[]> {
+    if (useLive()) return [];
     return demoStore.listExperiments();
   },
 

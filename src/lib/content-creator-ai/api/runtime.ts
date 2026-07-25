@@ -80,6 +80,8 @@ export function refreshContextAgent(): void {
 
 export interface RuntimeConfigInput {
   firecrawlApiKey?: string;
+  zernioApiKey?: string;
+  zernioApiBaseUrl?: string;
   llm?: {
     provider?: string;
     baseUrl?: string;
@@ -99,6 +101,16 @@ export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
   if (typeof input.firecrawlApiKey === "string" && input.firecrawlApiKey.trim()) {
     process.env.FIRECRAWL_API_KEY = input.firecrawlApiKey.trim();
     applied.push("firecrawlApiKey");
+  }
+
+  if (typeof input.zernioApiKey === "string" && input.zernioApiKey.trim()) {
+    process.env.ZERNIO_API_KEY = input.zernioApiKey.trim();
+    applied.push("zernioApiKey");
+  }
+
+  if (typeof input.zernioApiBaseUrl === "string" && input.zernioApiBaseUrl.trim()) {
+    process.env.ZERNIO_API_BASE = input.zernioApiBaseUrl.trim().replace(/\/$/, "");
+    applied.push("zernioApiBaseUrl");
   }
 
   const llm = input.llm;
@@ -165,6 +177,10 @@ export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
 export function applyRequestSecrets(headers: Headers): void {
   const firecrawl =
     headers.get("x-firecrawl-api-key") ?? headers.get("X-Firecrawl-Api-Key");
+  const zernioKey =
+    headers.get("x-zernio-api-key") ?? headers.get("X-Zernio-Api-Key");
+  const zernioBase =
+    headers.get("x-zernio-api-base") ?? headers.get("X-Zernio-Api-Base");
   const baseUrl =
     headers.get("x-llm-base-url") ?? headers.get("X-LLM-Base-Url");
   const model = headers.get("x-llm-model") ?? headers.get("X-LLM-Model");
@@ -172,10 +188,22 @@ export function applyRequestSecrets(headers: Headers): void {
   const provider =
     headers.get("x-llm-provider") ?? headers.get("X-LLM-Provider");
 
-  if (!firecrawl && !baseUrl && !model && !apiKey && !provider) return;
+  if (
+    !firecrawl &&
+    !zernioKey &&
+    !zernioBase &&
+    !baseUrl &&
+    !model &&
+    !apiKey &&
+    !provider
+  ) {
+    return;
+  }
 
   applyRuntimeConfig({
     firecrawlApiKey: firecrawl ?? undefined,
+    zernioApiKey: zernioKey ?? undefined,
+    zernioApiBaseUrl: zernioBase ?? undefined,
     llm:
       baseUrl || model || apiKey || provider
         ? {

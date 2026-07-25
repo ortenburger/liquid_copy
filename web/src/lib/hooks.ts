@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   api,
+  clearLiveStatus,
+  getEmptyLiveStatus,
+  getLiveStatusError,
   getLiveStatusSnapshot,
   subscribeLiveStatus,
 } from "./api";
@@ -16,8 +19,13 @@ function getDemoFlag(): boolean {
   return isDemoWorkspace();
 }
 
+/** Real mode never falls back to demo fixtures. */
 function getLiveSnapshot(): WorkflowStatus {
-  return getLiveStatusSnapshot() ?? demoStore.status();
+  return getLiveStatusSnapshot() ?? getEmptyLiveStatus();
+}
+
+function getLiveErrorSnapshot(): string | null {
+  return getLiveStatusError();
 }
 
 /** Re-render when Settings data-mode toggles. */
@@ -45,7 +53,11 @@ export function useWorkflowStatus(): WorkflowStatus {
   );
 
   useEffect(() => {
-    if (simulation) return;
+    if (simulation) {
+      clearLiveStatus();
+      return;
+    }
+    clearLiveStatus();
     void api.syncConfig().catch(() => undefined);
     void api.getWorkflowStatus().catch(() => undefined);
     const id = window.setInterval(() => {
@@ -55,6 +67,16 @@ export function useWorkflowStatus(): WorkflowStatus {
   }, [simulation]);
 
   return simulation ? demoStatus : liveStatus;
+}
+
+export function useLiveStatusError(): string | null {
+  const { simulation } = useDataMode();
+  const error = useSyncExternalStore(
+    subscribeLiveStatus,
+    getLiveErrorSnapshot,
+    getLiveErrorSnapshot,
+  );
+  return simulation ? null : error;
 }
 
 export function useAsyncAction() {

@@ -1,5 +1,5 @@
 /**
- * POST /api/content-creator-ai/config — apply Firecrawl / LLM secrets from the UI.
+ * POST /api/content-creator-ai/config — apply integration secrets from the UI.
  */
 import {
   jsonResponse,
@@ -10,6 +10,8 @@ import {
 
 interface ConfigBody {
   firecrawlApiKey?: string;
+  zernioApiKey?: string;
+  zernioApiBaseUrl?: string;
   llm?: {
     provider?: string;
     baseUrl?: string;
@@ -25,6 +27,8 @@ export async function POST(request: Request): Promise<Response> {
 
   const applied = applyRuntimeConfig({
     firecrawlApiKey: body.firecrawlApiKey,
+    zernioApiKey: body.zernioApiKey,
+    zernioApiBaseUrl: body.zernioApiBaseUrl,
     llm: body.llm,
   });
 

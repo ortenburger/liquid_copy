@@ -22,6 +22,10 @@ export interface AppSettings {
   /** Liquid Copy agent API origin when dataMode is real. */
   apiBaseUrl: string;
   firecrawlApiKey: string;
+  /** Zernio analytics API key (Bearer). */
+  zernioApiKey: string;
+  /** Zernio API origin (no trailing slash). */
+  zernioApiBaseUrl: string;
   openCarouselBaseUrl: string;
   llm: LLMSettings;
 }
@@ -90,6 +94,8 @@ export function defaultSettings(): AppSettings {
         "",
       ) ?? "http://localhost:8787",
     firecrawlApiKey: "",
+    zernioApiKey: "",
+    zernioApiBaseUrl: "https://api.zernio.com",
     openCarouselBaseUrl: "http://localhost:3000",
     llm: defaultLLMSettings("ollama"),
   };
@@ -124,6 +130,10 @@ export function loadSettings(): AppSettings {
         dataMode: parsed.dataMode === "real" ? "real" : "simulation",
         apiBaseUrl: String(parsed.apiBaseUrl ?? base.apiBaseUrl).replace(/\/$/, ""),
         firecrawlApiKey: String(parsed.firecrawlApiKey ?? ""),
+        zernioApiKey: String(parsed.zernioApiKey ?? ""),
+        zernioApiBaseUrl: String(
+          parsed.zernioApiBaseUrl ?? base.zernioApiBaseUrl,
+        ).replace(/\/$/, ""),
         openCarouselBaseUrl: String(
           parsed.openCarouselBaseUrl ?? base.openCarouselBaseUrl,
         ).replace(/\/$/, ""),
@@ -151,6 +161,7 @@ export function saveSettings(settings: AppSettings): void {
     ...settings,
     apiBaseUrl: settings.apiBaseUrl.replace(/\/$/, ""),
     openCarouselBaseUrl: settings.openCarouselBaseUrl.replace(/\/$/, ""),
+    zernioApiBaseUrl: settings.zernioApiBaseUrl.replace(/\/$/, ""),
     llm: {
       ...settings.llm,
       baseUrl: settings.llm.baseUrl.replace(/\/$/, ""),
