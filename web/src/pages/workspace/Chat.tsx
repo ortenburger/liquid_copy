@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import Markdown from "react-markdown";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { Markdown } from "../../components/ui/Markdown";
 import { TextArea } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { api, type ChatMessage } from "../../lib/api";
@@ -113,17 +113,7 @@ export function ChatPage() {
                 </time>
               </header>
               <div className="chat-bubble-body">
-                <Markdown
-                  components={{
-                    a: ({ href, children }) => (
-                      <a href={href} target="_blank" rel="noreferrer">
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {m.content}
-                </Markdown>
+                <Markdown source={m.content} />
               </div>
             </article>
           ))}
