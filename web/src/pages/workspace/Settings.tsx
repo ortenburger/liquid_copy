@@ -88,9 +88,15 @@ export function SettingsPage() {
   }
 
   async function onSave() {
-    saveSettings(settings);
+    const next = {
+      ...settings,
+      apiBaseUrl:
+        settings.apiBaseUrl.trim() || "http://localhost:8787",
+    };
+    setSettings(next);
+    saveSettings(next);
     setSavedAt(new Date().toLocaleTimeString());
-    if (settings.dataMode === "real" && settings.apiBaseUrl.trim()) {
+    if (next.dataMode === "real" && next.apiBaseUrl.trim()) {
       try {
         await api.syncConfig();
       } catch {
@@ -190,6 +196,9 @@ export function SettingsPage() {
             const next = {
               ...settings,
               dataMode: on ? ("real" as const) : ("simulation" as const),
+              apiBaseUrl:
+                settings.apiBaseUrl.trim() ||
+                "http://localhost:8787",
             };
             setSettings(next);
             saveSettings(next);

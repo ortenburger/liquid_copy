@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   api,
-  clearLiveStatus,
   getEmptyLiveStatus,
   getLiveStatusError,
   getLiveStatusSnapshot,
@@ -53,11 +52,9 @@ export function useWorkflowStatus(): WorkflowStatus {
   );
 
   useEffect(() => {
-    if (simulation) {
-      clearLiveStatus();
-      return;
-    }
-    clearLiveStatus();
+    if (simulation) return;
+    // Do not clearLiveStatus() here — that would churn the empty snapshot
+    // reference and trip useSyncExternalStore into an infinite loop.
     void api.syncConfig().catch(() => undefined);
     void api.getWorkflowStatus().catch(() => undefined);
     const id = window.setInterval(() => {

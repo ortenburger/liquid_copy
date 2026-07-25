@@ -85,6 +85,8 @@ export function defaultLLMSettings(provider: LLMProvider = "ollama"): LLMSetting
   };
 }
 
+export const DEFAULT_API_BASE_URL = "http://localhost:8787";
+
 export function defaultSettings(): AppSettings {
   return {
     dataMode: "simulation",
@@ -92,7 +94,7 @@ export function defaultSettings(): AppSettings {
       (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
         /\/$/,
         "",
-      ) ?? "http://localhost:8787",
+      ) ?? DEFAULT_API_BASE_URL,
     firecrawlApiKey: "",
     zernioApiKey: "",
     zernioApiBaseUrl: "https://api.zernio.com",
@@ -185,6 +187,9 @@ export function isDemoWorkspace(): boolean {
 export function getApiBaseUrl(): string | undefined {
   const settings = loadSettings();
   if (settings.dataMode !== "real") return undefined;
-  const url = settings.apiBaseUrl || (import.meta.env.VITE_API_BASE_URL as string | undefined);
-  return url?.replace(/\/$/, "") || undefined;
+  const url =
+    settings.apiBaseUrl.trim() ||
+    (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ||
+    DEFAULT_API_BASE_URL;
+  return url.replace(/\/$/, "") || DEFAULT_API_BASE_URL;
 }

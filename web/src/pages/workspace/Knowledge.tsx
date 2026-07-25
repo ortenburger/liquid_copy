@@ -1,9 +1,11 @@
 import { useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
+import { getApiBaseUrl } from "../../lib/settings";
 import type { RAGPassage } from "../../lib/types";
 import "./workspace.css";
 
@@ -16,6 +18,7 @@ export function KnowledgePage() {
   const [ingestBusy, setIngestBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ingestMsg, setIngestMsg] = useState<string | null>(null);
+  const apiBase = getApiBaseUrl();
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
@@ -69,17 +72,25 @@ export function KnowledgePage() {
       </header>
 
       {!simulation ? (
-        <form className="search-form" onSubmit={onIngest}>
-          <Input
-            label="Ingest company URL (Firecrawl)"
-            value={companyUrl}
-            onChange={(e) => setCompanyUrl(e.target.value)}
-            placeholder="https://yourcompany.com"
-          />
-          <Button type="submit" variant="primary" disabled={ingestBusy}>
-            Ingest
-          </Button>
-        </form>
+        <>
+          <p className="info-banner">
+            Live ingest → API at <code>{apiBase ?? "not set"}</code>. Firecrawl
+            key is sent from Settings. Need{" "}
+            <Link to="/app/settings">Settings</Link> saved +{" "}
+            <code>npm run api:dev</code>.
+          </p>
+          <form className="search-form" onSubmit={onIngest}>
+            <Input
+              label="Ingest company URL (Firecrawl)"
+              value={companyUrl}
+              onChange={(e) => setCompanyUrl(e.target.value)}
+              placeholder="https://yourcompany.com"
+            />
+            <Button type="submit" variant="primary" disabled={ingestBusy}>
+              Ingest
+            </Button>
+          </form>
+        </>
       ) : null}
       {ingestMsg ? <p className="info-banner">{ingestMsg}</p> : null}
 
@@ -96,7 +107,10 @@ export function KnowledgePage() {
         </Button>
       </form>
 
-      <Progress active={busy || ingestBusy} label="Talking to the knowledge layer" />
+      <Progress
+        active={busy || ingestBusy}
+        label="Talking to the knowledge layer"
+      />
       {error ? <p className="error-banner">{error}</p> : null}
 
       {results.length === 0 && !busy ? (

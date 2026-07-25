@@ -36,6 +36,9 @@ function emptyWorkflowStatus(): WorkflowStatus {
   };
 }
 
+/** Stable placeholder for useSyncExternalStore — never allocate per snapshot. */
+const EMPTY_LIVE_STATUS: WorkflowStatus = emptyWorkflowStatus();
+
 function authHeaders(): HeadersInit {
   const s = loadSettings();
   const headers: Record<string, string> = {
@@ -187,7 +190,7 @@ export function getLiveStatusSnapshot(): WorkflowStatus | null {
 
 /** Empty pending pipeline — used instead of demo fixtures in real mode. */
 export function getEmptyLiveStatus(): WorkflowStatus {
-  return emptyWorkflowStatus();
+  return EMPTY_LIVE_STATUS;
 }
 
 export function getLiveStatusError(): string | null {
@@ -317,14 +320,25 @@ export const api = {
   },
 
   async ingestCompany(companyUrl: string): Promise<unknown> {
-    if (useLive()) {
-      await this.syncConfig();
-      return liveFetch("/api/content-creator-ai/ingest", {
-        method: "POST",
-        body: JSON.stringify({ companyUrl }),
-      });
+    if (isDemoWorkspace()) {
+      throw new Error(
+        "Ingest needs real data mode. Enable it under Settings → Use real data.",
+      );
     }
-    throw new Error("Ingest requires real data mode and a running API.");
+    const base = getApiBaseUrl();
+    if (!base) {
+      throw new Error(
+        "Set the Liquid Copy API base URL in Settings (default http://localhost:8787) and run npm run api:dev.",
+      );
+    }
+    if (!companyUrl || companyUrl === "https://" || companyUrl === "http://") {
+      throw new Error("Enter a full company URL (e.g. https://example.com).");
+    }
+    await this.syncConfig();
+    return liveFetch("/api/content-creator-ai/ingest", {
+      method: "POST",
+      body: JSON.stringify({ companyUrl }),
+    });
   },
 
   async listExperiments(): Promise<ExperimentCard[]> {
