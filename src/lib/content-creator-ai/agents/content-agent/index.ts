@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type {
+  CompanyIdentity,
   Hypothesis,
   PostVariant,
   PostSlide,
@@ -18,11 +19,96 @@ import {
 const DEFAULT_OPENCAROUSEL_BASE =
   process.env.OPENCAROUSEL_BASE_URL ?? "http://localhost:3000";
 
+/**
+ * Map Liquid Copy KB company identity → Open Carrusel BrandConfig fields.
+ * Prefer this over re-running Firecrawl inside the studio.
+ */
+export function companyIdentityToOpenCarouselBrand(
+  identity: CompanyIdentity,
+  options?: {
+    websiteUrl?: string;
+    visualTheme?: string;
+  },
+): Record<string, unknown> {
+  const keywords = new Set<string>();
+  for (const part of [
+    identity.brandVoice,
+    identity.brandSignals?.tone,
+    identity.brandSignals?.style,
+    options?.visualTheme,
+    identity.industry,
+  ]) {
+    if (!part?.trim()) continue;
+    for (const token of part.split(/[,;/|]+|\s{2,}/)) {
+      const t = token.trim().toLowerCase();
+      if (t.length >= 3 && t.length <= 40) keywords.add(t);
+    }
+  }
+  for (const value of identity.values ?? []) {
+    if (value.trim()) keywords.add(value.trim().toLowerCase());
+  }
+  for (const term of identity.brandSignals?.recurringTerminology ?? []) {
+    if (term.trim()) keywords.add(term.trim().toLowerCase());
+  }
+
+  const STYLE_VOCAB = new Set([
+    "minimal",
+    "bold",
+    "playful",
+    "corporate",
+    "luxury",
+    "vintage",
+    "modern",
+    "elegant",
+    "creative",
+    "professional",
+  ]);
+  const styleKeywords = [...keywords].filter((k) => STYLE_VOCAB.has(k));
+  if (styleKeywords.length === 0) {
+    if (/professional|corporate|b2b|saas/i.test(identity.brandVoice)) {
+      styleKeywords.push("professional", "modern");
+    } else if (/playful|fun|bold/i.test(identity.brandVoice)) {
+      styleKeywords.push("playful", "bold");
+    } else {
+      styleKeywords.push("modern", "minimal");
+    }
+  }
+
+  return {
+    name: identity.name.trim(),
+    websiteUrl: (options?.websiteUrl ?? "").trim(),
+    styleKeywords: styleKeywords.slice(0, 8),
+  };
+}
+
+/** Human-readable brand brief for chat / slide context (no second scrape). */
+export function formatIdentityBrief(identity: CompanyIdentity): string {
+  const lines = [
+    `Company: ${identity.name}`,
+    identity.industry ? `Industry: ${identity.industry}` : "",
+    `Mission: ${identity.mission}`,
+    identity.vision ? `Vision: ${identity.vision}` : "",
+    `Brand voice: ${identity.brandVoice}`,
+    identity.brandSignals
+      ? `Tone/style: ${identity.brandSignals.tone}; ${identity.brandSignals.style}`
+      : "",
+    identity.values?.length ? `Values: ${identity.values.join(", ")}` : "",
+    identity.features?.length
+      ? `Features: ${identity.features.slice(0, 8).join(", ")}`
+      : "",
+    identity.benefits?.length
+      ? `Benefits: ${identity.benefits.slice(0, 8).join(", ")}`
+      : "",
+  ];
+  return lines.filter(Boolean).join("\n");
+}
+
 export interface OpenCarouselClient {
   createCarousel(input: {
     name: string;
     aspectRatio: AspectRatio;
   }): Promise<{ id: string }>;
+  /** Push a BrandConfig-compatible payload into Open Carrusel `/api/brand`. */
   applyBrand(brand: Record<string, unknown>): Promise<void>;
   chat(message: string, carouselId: string): Promise<void>;
   updateCarousel(
@@ -231,6 +317,10 @@ export class ContentAgent {
       hashtags?: string[];
       slidesPerVariant?: number;
       traceabilityBase?: Partial<TraceabilityChain>;
+      /** KB company identity — pushed into Open Carrusel brand (no Firecrawl). */
+      identity?: CompanyIdentity;
+      /** Original ingest URL for BrandConfig.websiteUrl. */
+      websiteUrl?: string;
     },
   ): Promise<ContentGenerationResult> {
     const errors: string[] = [];
@@ -258,7 +348,34 @@ export class ContentAgent {
       }
     }
 
-    const brandContext = brandPassages.map((p) => p.content).join("\n\n");
+    const identityBrief = options?.identity
+      ? formatIdentityBrief(options.identity)
+      : "";
+    const brandContext = [
+      identityBrief,
+      brandPassages.map((p) => p.content).join("\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (identityBrief) withoutBrandContext = false;
+
+    // Seed Open Carrusel brand.json once from KB — studio skips Firecrawl fill.
+    if (options?.identity?.name?.trim()) {
+      try {
+        const brandPatch = companyIdentityToOpenCarouselBrand(options.identity, {
+          websiteUrl: options.websiteUrl,
+          visualTheme: hypothesis.visualTheme,
+        });
+        await this.client.applyBrand(brandPatch);
+        console.info(
+          `[content-agent] seeded Open Carrusel brand from KB: ${options.identity.name}`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`Open Carrusel brand seed failed: ${msg}`);
+        console.warn(`[content-agent] brand seed failed: ${msg}`);
+      }
+    }
 
     for (const platform of platforms) {
       const aspectRatio = aspectRatioForPlatform(platform);
@@ -277,6 +394,7 @@ export class ContentAgent {
             brandContext,
             withoutBrandContext,
             traceabilityBase: options?.traceabilityBase,
+            companyName: options?.identity?.name,
           });
           platformVariants.push(variant);
         } catch (err) {
@@ -335,6 +453,7 @@ export class ContentAgent {
     brandContext: string;
     withoutBrandContext: boolean;
     traceabilityBase?: Partial<TraceabilityChain>;
+    companyName?: string;
   }): Promise<PostVariant> {
     const {
       hypothesis,
@@ -347,37 +466,48 @@ export class ContentAgent {
       brandContext,
       withoutBrandContext,
       traceabilityBase,
+      companyName,
     } = args;
 
-    // Step 1: create carousel
-    const { id: carouselId } = await this.client.createCarousel({
-      name: `${hypothesis.id}-v${index + 1}-${platform}`,
-      aspectRatio,
-    });
+    // Step 1: create carousel (brand already seeded once in generate())
+    const carouselName = [
+      companyName?.trim(),
+      hypothesis.hook.slice(0, 48),
+      `v${index + 1}`,
+      platform,
+    ]
+      .filter(Boolean)
+      .join(" · ")
+      .slice(0, 120);
 
-    // Step 2: brand + chat with Hypothesis fields
-    await this.client.applyBrand({
-      voice: brandContext || hypothesis.theme,
-      visualTheme: hypothesis.visualTheme,
-      hook: hypothesis.hook,
-      angle: hypothesis.angle,
-      coreCopy: hypothesis.coreCopy,
-      cta: cta ?? "",
+    const { id: carouselId } = await this.client.createCarousel({
+      name: carouselName || `${hypothesis.id}-v${index + 1}-${platform}`,
+      aspectRatio,
     });
 
     const prompt = [
       `Create carousel variant ${index + 1} for ${platform}.`,
+      `Use the existing brand config already loaded in Open Carrusel — do not scrape the website again.`,
       `Hook: ${hypothesis.hook}`,
       `Angle: ${hypothesis.angle}`,
       `Visual Theme: ${hypothesis.visualTheme}`,
       `Core Copy: ${hypothesis.coreCopy}`,
       cta ? `CTA: ${cta}` : "",
-      brandContext ? `Brand context:\n${brandContext}` : "",
+      brandContext ? `Brand context (from Liquid Copy KB):\n${brandContext}` : "",
     ]
       .filter(Boolean)
       .join("\n");
 
-    await this.client.chat(prompt, carouselId);
+    try {
+      await this.client.chat(prompt, carouselId);
+    } catch (err) {
+      // Open Carrusel chat often needs Claude CLI — still ship slides/caption.
+      console.warn(
+        `[content-agent] Open Carrusel chat skipped for ${carouselId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
 
     // Step 3: slide generation (1–10 HTML body fragments)
     const slides = buildSlides(hypothesis, slidesPerVariant);

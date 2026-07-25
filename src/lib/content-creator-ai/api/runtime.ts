@@ -21,6 +21,7 @@ import {
   buildLLMClientFromConfig,
 } from "../integrations/llm.js";
 import { traceability, type TraceabilityBuilder } from "./traceability.js";
+import { registerWorkflowStageHandlers } from "./stage-handlers.js";
 import { SUPPORTED_PLATFORMS } from "../agents/strategy-agent/goal-validation.js";
 
 /** Requirement 14.5 — manual knowledge search returns up to 10 results. */
@@ -45,14 +46,24 @@ function buildContextAgent(): ContextAgent {
   });
 }
 
+function wireWorkflowHandlers(workflow: WorkflowEngine, audienceAgent: AudienceAgent): void {
+  registerWorkflowStageHandlers({
+    workflow,
+    audienceAgent,
+  });
+}
+
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
   const checkpoints = new CheckpointManager();
+  const audienceAgent = new AudienceAgent({ llm: getLLMClient() });
+  const workflow = new WorkflowEngine({ checkpoints });
+  wireWorkflowHandlers(workflow, audienceAgent);
   runtime = {
     checkpoints,
-    workflow: new WorkflowEngine({ checkpoints }),
+    workflow,
     contextAgent: buildContextAgent(),
-    audienceAgent: new AudienceAgent(),
+    audienceAgent,
     traceability,
   };
   return runtime;
@@ -100,6 +111,9 @@ export interface RuntimeConfigInput {
   firecrawlApiKey?: string;
   zernioApiKey?: string;
   zernioApiBaseUrl?: string;
+  openCarouselBaseUrl?: string;
+  /** Last company URL ingested on Knowledge — used for Open Carrusel websiteUrl. */
+  lastFirecrawlUrl?: string;
   llm?: {
     provider?: string;
     baseUrl?: string;
@@ -142,6 +156,31 @@ export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
       )
     ) {
       applied.push("zernioApiBaseUrl");
+    }
+  }
+
+  if (
+    typeof input.openCarouselBaseUrl === "string" &&
+    input.openCarouselBaseUrl.trim()
+  ) {
+    if (
+      assignEnv(
+        "OPENCAROUSEL_BASE_URL",
+        input.openCarouselBaseUrl.trim().replace(/\/$/, ""),
+      )
+    ) {
+      applied.push("openCarouselBaseUrl");
+    }
+  }
+
+  if (typeof input.lastFirecrawlUrl === "string" && input.lastFirecrawlUrl.trim()) {
+    const url = input.lastFirecrawlUrl.trim();
+    if (
+      url !== "https://" &&
+      url !== "http://" &&
+      assignEnv("LAST_FIRECRAWL_URL", url)
+    ) {
+      applied.push("lastFirecrawlUrl");
     }
   }
 
@@ -221,6 +260,11 @@ export function applyRequestSecrets(headers: Headers): void {
     headers.get("x-zernio-api-key") ?? headers.get("X-Zernio-Api-Key");
   const zernioBase =
     headers.get("x-zernio-api-base") ?? headers.get("X-Zernio-Api-Base");
+  const openCarousel =
+    headers.get("x-open-carousel-base-url") ??
+    headers.get("X-Open-Carousel-Base-Url");
+  const lastFirecrawl =
+    headers.get("x-last-firecrawl-url") ?? headers.get("X-Last-Firecrawl-Url");
   const baseUrl =
     headers.get("x-llm-base-url") ?? headers.get("X-LLM-Base-Url");
   const model = headers.get("x-llm-model") ?? headers.get("X-LLM-Model");
@@ -237,6 +281,8 @@ export function applyRequestSecrets(headers: Headers): void {
     !firecrawl &&
     !zernioKey &&
     !zernioBase &&
+    !openCarousel &&
+    !lastFirecrawl &&
     !baseUrl &&
     !model &&
     !apiKey &&
@@ -251,6 +297,8 @@ export function applyRequestSecrets(headers: Headers): void {
     firecrawlApiKey: firecrawl ?? undefined,
     zernioApiKey: zernioKey ?? undefined,
     zernioApiBaseUrl: zernioBase ?? undefined,
+    openCarouselBaseUrl: openCarousel ?? undefined,
+    lastFirecrawlUrl: lastFirecrawl ?? undefined,
     llm:
       baseUrl || model || apiKey || provider || fallbackApiKey || fallbackModel
         ? {

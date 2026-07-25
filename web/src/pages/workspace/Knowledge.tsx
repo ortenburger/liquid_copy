@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Markdown } from "../../components/ui/Markdown";
@@ -18,9 +18,34 @@ export function KnowledgePage() {
   const [results, setResults] = useState<RAGPassage[]>([]);
   const [busy, setBusy] = useState(false);
   const [ingestBusy, setIngestBusy] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ingestMsg, setIngestMsg] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
+  const [kbStatus, setKbStatus] = useState<{
+    entityCount: number;
+    indexedDocuments: number;
+  } | null>(null);
+
+  const refreshKbStatus = useCallback(async () => {
+    if (simulation) {
+      setKbStatus(null);
+      return;
+    }
+    try {
+      const status = await api.getKnowledgeStatus();
+      setKbStatus({
+        entityCount: status.entityCount,
+        indexedDocuments: status.indexedDocuments,
+      });
+    } catch {
+      setKbStatus(null);
+    }
+  }, [simulation]);
+
+  useEffect(() => {
+    void refreshKbStatus();
+  }, [refreshKbStatus]);
 
   function persistCompanyUrl(url: string) {
     setCompanyUrl(url);
@@ -37,6 +62,7 @@ export function KnowledgePage() {
     try {
       const passages = await api.search(query);
       setResults(passages);
+      void refreshKbStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setResults([]);
@@ -69,10 +95,39 @@ export function KnowledgePage() {
                 : ""
             }${result.kbVersion ? ` · KB ${result.kbVersion}` : ""}`,
       );
+      void refreshKbStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIngestBusy(false);
+    }
+  }
+
+  async function onClearKb() {
+    if (
+      !window.confirm(
+        "Clear the entire knowledge base? This deletes all ingested company memory on disk and cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    setClearBusy(true);
+    setError(null);
+    setIngestMsg(null);
+    try {
+      const result = await api.clearKnowledge();
+      setResults([]);
+      setSearched(false);
+      setIngestMsg(
+        result.removed.length > 0
+          ? `Cleared ${result.removed.length} KB entit${result.removed.length === 1 ? "y" : "ies"}`
+          : "Knowledge base was already empty",
+      );
+      void refreshKbStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClearBusy(false);
     }
   }
 
@@ -83,7 +138,24 @@ export function KnowledgePage() {
           <p className="eyebrow">RAG retrieval</p>
           <h1 className="page-title">Knowledge</h1>
         </div>
+        {!simulation ? (
+          <Button
+            variant="ghost"
+            disabled={clearBusy || (kbStatus?.entityCount ?? 0) === 0}
+            onClick={() => void onClearKb()}
+          >
+            Clear knowledge base
+          </Button>
+        ) : null}
       </header>
+
+      {!simulation && kbStatus ? (
+        <p className="panel-meta">
+          Persistent on disk · {kbStatus.entityCount} entit
+          {kbStatus.entityCount === 1 ? "y" : "ies"} · {kbStatus.indexedDocuments}{" "}
+          indexed for search
+        </p>
+      ) : null}
 
       {!simulation ? (
         <form className="search-form" onSubmit={onIngest}>
@@ -114,7 +186,7 @@ export function KnowledgePage() {
       </form>
 
       <Progress
-        active={busy || ingestBusy}
+        active={busy || ingestBusy || clearBusy}
         label="Talking to the knowledge layer"
       />
       {error ? <p className="error-banner">{error}</p> : null}

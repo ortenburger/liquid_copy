@@ -8,6 +8,7 @@ import {
   unlinkSync,
   lstatSync,
   copyFileSync,
+  rmSync,
 } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -47,6 +48,11 @@ function getStorageRoot(override?: string): string {
     process.env.KB_STORAGE_PATH ??
     join(process.cwd(), ".kb-storage")
   );
+}
+
+/** Absolute filesystem root for KB markdown (persists across API restarts). */
+export function resolveKBStoragePath(override?: string): string {
+  return getStorageRoot(override);
 }
 
 function ensureDir(path: string): void {
@@ -308,6 +314,45 @@ export function entityStorageFingerprint(
   return parts.join("\n");
 }
 
+/** Entity ids that have a current markdown snapshot on disk. */
+export function listKBEntityIds(storagePath?: string): string[] {
+  const root = getStorageRoot(storagePath);
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name)
+    .filter((id) =>
+      existsSync(join(entityDir(root, id), currentFileName(id))),
+    )
+    .sort();
+}
+
+/** Read entityType from meta when present. */
+export function readKBEntityType(
+  entityId: string,
+  storagePath?: string,
+): KBEntityType | null {
+  const root = getStorageRoot(storagePath);
+  const meta = readMeta(entityDir(root, entityId), entityId);
+  return meta?.entityType ?? null;
+}
+
+/**
+ * Delete every entity directory under the KB root. Markdown + meta are removed;
+ * call vector-store clear separately. Used by Knowledge → Clear.
+ */
+export function clearAllKBStorage(storagePath?: string): {
+  root: string;
+  removed: string[];
+} {
+  const root = getStorageRoot(storagePath);
+  const removed = listKBEntityIds(storagePath);
+  for (const id of removed) {
+    rmSync(entityDir(root, id), { recursive: true, force: true });
+  }
+  return { root, removed };
+}
+
 /**
  * Next monotonically incrementing version number for an experiment entity.
  */
@@ -318,8 +363,4 @@ export async function nextExperimentVersion(
   const root = getStorageRoot(storagePath);
   const meta = readMeta(entityDir(root, experimentId), experimentId);
   return (meta?.experimentVersionCounter ?? meta?.latestVersion ?? 0) + 1;
-}
-
-export function resolveKBStoragePath(override?: string): string {
-  return getStorageRoot(override);
 }

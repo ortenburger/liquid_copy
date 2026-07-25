@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
@@ -31,12 +31,20 @@ export function CarouselsPage() {
   const settings = loadSettings();
   const baseUrl = settings.openCarouselBaseUrl || "http://localhost:3000";
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const [searchParams] = useSearchParams();
+  const viewFromQuery = searchParams.get("view");
 
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState<boolean | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [carousels, setCarousels] = useState<OpenCarouselSummary[]>([]);
-  const [view, setView] = useState<StudioView>("home");
+  const [view, setView] = useState<StudioView>(
+    () => viewFromQuery?.trim() || "home",
+  );
+
+  useEffect(() => {
+    if (viewFromQuery?.trim()) setView(viewFromQuery.trim());
+  }, [viewFromQuery]);
 
   const iframeSrc =
     view === "home"

@@ -1,8 +1,17 @@
 import { eventBus } from "../orchestration/event-bus.js";
 import type { KBEntityType, RetrievalScope } from "../types/enums.js";
 import type { KBDocument } from "../types/index.js";
-import { readKBEntity } from "../kb/storage.js";
-import { indexDocuments } from "./vectorstore.js";
+import {
+  listKBEntityIds,
+  listVersions,
+  readKBEntity,
+  readKBEntityType,
+  resolveKBStoragePath,
+} from "../kb/storage.js";
+import {
+  getVectorStore,
+  indexDocuments,
+} from "./vectorstore.js";
 
 const REINDEX_DEADLINE_MS = 60_000;
 
@@ -17,6 +26,70 @@ function scopeForEntityType(entityType: KBEntityType): RetrievalScope {
     case "experiment":
       return "experiment_history";
   }
+}
+
+function inferEntityType(entityId: string): KBEntityType {
+  if (entityId.startsWith("persona-")) return "audience";
+  if (entityId.startsWith("roadmap-") || entityId.startsWith("hypothesis-")) {
+    return "experiment";
+  }
+  if (entityId.startsWith("product-")) return "product";
+  return "company_identity";
+}
+
+export interface RebuildIndexResult {
+  storagePath: string;
+  entityCount: number;
+  indexed: number;
+  entityIds: string[];
+}
+
+/**
+ * Rebuild the in-memory RAG index from on-disk KB markdown.
+ * Call on API boot so search survives process restarts (disk is source of truth).
+ */
+export async function rebuildVectorIndexFromDisk(
+  storagePath?: string,
+): Promise<RebuildIndexResult> {
+  const root = resolveKBStoragePath(storagePath);
+  const entityIds = listKBEntityIds(storagePath);
+  await getVectorStore().clear();
+
+  const docs: KBDocument[] = [];
+  for (const entityId of entityIds) {
+    const content = await readKBEntity(entityId, storagePath);
+    if (!content) continue;
+    const entityType =
+      readKBEntityType(entityId, storagePath) ?? inferEntityType(entityId);
+    const versions = await listVersions(entityId, storagePath);
+    const version =
+      versions.length > 0
+        ? versions[versions.length - 1]!.versionNumber
+        : 1;
+    docs.push({
+      id: `${entityId}_v${version}`,
+      entityId,
+      entityType,
+      scope: scopeForEntityType(entityType),
+      content,
+      metadata: { version },
+    });
+  }
+
+  if (docs.length > 0) {
+    await indexDocuments(docs);
+  }
+
+  console.info(
+    `[rag] rebuilt vector index from ${root}: ${docs.length} doc(s) / ${entityIds.length} entit(ies)`,
+  );
+
+  return {
+    storagePath: root,
+    entityCount: entityIds.length,
+    indexed: docs.length,
+    entityIds,
+  };
 }
 
 export interface ReindexHandle {
