@@ -1,4 +1,5 @@
 // Feature: content-creator-ai, Property 1: User-provided values always take precedence in KB merge
+// Feature: content-creator-ai, Property 2: Company summary always contains required structural fields
 // Feature: content-creator-ai, Property 3: KB edit always creates a version record with prior values
 // Feature: content-creator-ai, Property 4: Rejection never mutates the KB
 // Feature: content-creator-ai, Property 5: KB Markdown serialisation preserves required sections
@@ -27,6 +28,7 @@ import {
   resolveKBStoragePath,
 } from "@/lib/content-creator-ai/kb/storage.js";
 import { eventBus } from "@/lib/content-creator-ai/orchestration/event-bus.js";
+import { buildCompanySummary } from "@/lib/content-creator-ai/agents/context-agent/summary.js";
 import type {
   AudiencePersona,
   CompanyIdentity,
@@ -324,5 +326,73 @@ describe("KB merge & storage property tests", () => {
 
   test("storage path respects KB_STORAGE_PATH", () => {
     expect(resolveKBStoragePath()).toBe(storagePath);
+  });
+});
+
+// Feature: content-creator-ai, Property 2: Company summary always contains required structural fields
+describe("Context_Agent company summary property tests", () => {
+  // Arbitrary page content: any length, any script, markdown or not. Deliberately
+  // includes empty page sets and content with no company-like structure at all.
+  const pageArb = fc.record({
+    url: fc.oneof(
+      fc.constant(""),
+      fc.webUrl(),
+      fc.string({ maxLength: 30 }),
+    ),
+    title: fc.option(fc.string({ maxLength: 60 }), { nil: undefined }),
+    markdown: fc.string({ maxLength: 400 }),
+  });
+
+  test("Property 2: summary always has name, mission, brand voice and >= 1 product", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(pageArb, { minLength: 0, maxLength: 6 }),
+        fc.option(fc.webUrl(), { nil: undefined }),
+        async (pages, sourceUrl) => {
+          // No LLM: exercises the deterministic fallback chain that makes this
+          // property unconditional.
+          const { summary } = await buildCompanySummary({ pages, sourceUrl });
+
+          if (summary.name.trim().length === 0) return false;
+          if (summary.mission.trim().length === 0) return false;
+          if (summary.brandVoice.trim().length === 0) return false;
+          if (!Array.isArray(summary.products) || summary.products.length < 1) {
+            return false;
+          }
+          // Every product entry must itself be identifiable.
+          return summary.products.every(
+            (p) => p.id.trim().length > 0 && p.name.trim().length > 0,
+          );
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
+
+  test("Property 2 holds for zero scraped pages", async () => {
+    const { summary, warnings } = await buildCompanySummary({ pages: [] });
+    expect(summary.name.trim()).not.toBe("");
+    expect(summary.mission.trim()).not.toBe("");
+    expect(summary.brandVoice.trim()).not.toBe("");
+    expect(summary.products.length).toBeGreaterThanOrEqual(1);
+    // The operator is told the fields were derived rather than scraped.
+    expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  test("Property 2 holds for non-Latin content", async () => {
+    const { summary } = await buildCompanySummary({
+      pages: [
+        {
+          url: "https://例え.jp",
+          title: "株式会社サンプル",
+          markdown: "# 株式会社サンプル\n\n私たちの使命は、顧客に価値を届けることです。",
+        },
+      ],
+      sourceUrl: "https://例え.jp",
+    });
+    expect(summary.name).toContain("株式会社サンプル");
+    expect(summary.mission.trim()).not.toBe("");
+    expect(summary.brandVoice.trim()).not.toBe("");
+    expect(summary.products.length).toBeGreaterThanOrEqual(1);
   });
 });
