@@ -229,6 +229,24 @@ export class WorkflowEngine {
   }
 
   /**
+   * Re-open a stage and every stage after it (keeps earlier completed outputs).
+   * Used to retry Full Auto Publishing → Analytics → Learning after a no-op publish.
+   */
+  reopenFrom(stage: WorkflowStage): void {
+    const start = WORKFLOW_STAGES.indexOf(stage);
+    if (start < 0) return;
+    for (let i = start; i < WORKFLOW_STAGES.length; i++) {
+      const s = WORKFLOW_STAGES[i]!;
+      this.records.set(s, {
+        stage: s,
+        status: "pending",
+        approvedByUser: false,
+      });
+    }
+    this.emit({ type: "mode_changed", mode: this.getMode() });
+  }
+
+  /**
    * Restore stages / platforms / mode from a disk snapshot (API restart).
    * Handlers stay as registered on this instance.
    */
