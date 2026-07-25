@@ -1,34 +1,44 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
-import { Progress, StreamingCaret } from "../../components/ui/Progress";
+import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
-import { getApiBaseUrl } from "../../lib/settings";
+import { loadSettings, saveSettings } from "../../lib/settings";
 import type { RAGPassage } from "../../lib/types";
 import "./workspace.css";
 
 export function KnowledgePage() {
   const { simulation } = useDataMode();
   const [query, setQuery] = useState("brand voice");
-  const [companyUrl, setCompanyUrl] = useState("https://");
+  const [companyUrl, setCompanyUrl] = useState(
+    () => loadSettings().lastFirecrawlUrl || "https://",
+  );
   const [results, setResults] = useState<RAGPassage[]>([]);
   const [busy, setBusy] = useState(false);
   const [ingestBusy, setIngestBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ingestMsg, setIngestMsg] = useState<string | null>(null);
-  const apiBase = getApiBaseUrl();
+  const [searched, setSearched] = useState(false);
+
+  function persistCompanyUrl(url: string) {
+    setCompanyUrl(url);
+    const settings = loadSettings();
+    if (settings.lastFirecrawlUrl === url) return;
+    saveSettings({ ...settings, lastFirecrawlUrl: url });
+  }
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
+    setSearched(true);
     try {
       const passages = await api.search(query);
       setResults(passages);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setResults([]);
     } finally {
       setBusy(false);
     }
@@ -36,24 +46,27 @@ export function KnowledgePage() {
 
   async function onIngest(e: FormEvent) {
     e.preventDefault();
+    const url = companyUrl.trim();
+    persistCompanyUrl(url);
     setIngestBusy(true);
     setIngestMsg(null);
     setError(null);
     try {
-      const result = (await api.ingestCompany(companyUrl.trim())) as {
+      const result = (await api.ingestCompany(url)) as {
         status?: string;
         warnings?: string[];
         companySummary?: { name?: string };
         draftId?: string;
+        kbVersion?: string;
       };
       setIngestMsg(
         result.status === "firecrawl_error"
           ? `Firecrawl error${result.warnings?.[0] ? `: ${result.warnings[0]}` : ""}`
-          : `Ingest ${result.status ?? "ok"}${
+          : `Ingested${
               result.companySummary?.name
                 ? ` · ${result.companySummary.name}`
                 : ""
-            }${result.draftId ? ` · draft ${result.draftId}` : ""}`,
+            }${result.kbVersion ? ` · KB ${result.kbVersion}` : ""}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -72,25 +85,17 @@ export function KnowledgePage() {
       </header>
 
       {!simulation ? (
-        <>
-          <p className="info-banner">
-            Live ingest → API at <code>{apiBase ?? "not set"}</code>. Firecrawl
-            key is sent from Settings. Need{" "}
-            <Link to="/app/settings">Settings</Link> saved +{" "}
-            <code>npm run api:dev</code>.
-          </p>
-          <form className="search-form" onSubmit={onIngest}>
-            <Input
-              label="Ingest company URL (Firecrawl)"
-              value={companyUrl}
-              onChange={(e) => setCompanyUrl(e.target.value)}
-              placeholder="https://yourcompany.com"
-            />
-            <Button type="submit" variant="primary" disabled={ingestBusy}>
-              Ingest
-            </Button>
-          </form>
-        </>
+        <form className="search-form" onSubmit={onIngest}>
+          <Input
+            label="Ingest company URL (Firecrawl)"
+            value={companyUrl}
+            onChange={(e) => persistCompanyUrl(e.target.value)}
+            placeholder="https://yourcompany.com"
+          />
+          <Button type="submit" variant="primary" disabled={ingestBusy}>
+            Ingest
+          </Button>
+        </form>
       ) : null}
       {ingestMsg ? <p className="info-banner">{ingestMsg}</p> : null}
 
@@ -113,12 +118,7 @@ export function KnowledgePage() {
       />
       {error ? <p className="error-banner">{error}</p> : null}
 
-      {results.length === 0 && !busy ? (
-        <p className="empty-hint">
-          Query the knowledge base
-          <StreamingCaret />
-        </p>
-      ) : (
+      {busy ? null : results.length > 0 ? (
         <ul className="list-stack">
           {results.map((passage) => (
             <li
@@ -138,7 +138,13 @@ export function KnowledgePage() {
             </li>
           ))}
         </ul>
-      )}
+      ) : searched ? (
+        <p className="empty-hint">
+          {simulation
+            ? "No matching passages in the demo fixtures."
+            : "No passages yet. Ingest a company URL above, then search again."}
+        </p>
+      ) : null}
     </div>
   );
 }

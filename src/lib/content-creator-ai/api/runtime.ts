@@ -18,8 +18,7 @@ import {
   getLLMClient,
   resetLLMClient,
   setLLMClient,
-  OllamaLLMClient,
-  OpenAICompatibleLLMClient,
+  buildLLMClientFromConfig,
 } from "../integrations/llm.js";
 import { traceability, type TraceabilityBuilder } from "./traceability.js";
 import { SUPPORTED_PLATFORMS } from "../agents/strategy-agent/goal-validation.js";
@@ -88,6 +87,9 @@ export interface RuntimeConfigInput {
     model?: string;
     apiKey?: string;
     temperature?: number;
+    /** Claude key used when local Ollama is slow/down. */
+    fallbackApiKey?: string;
+    fallbackModel?: string;
   };
 }
 
@@ -135,38 +137,26 @@ export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
       process.env.LLM_TEMPERATURE = String(llm.temperature);
       applied.push("llm.temperature");
     }
+    if (typeof llm.fallbackApiKey === "string") {
+      process.env.LLM_FALLBACK_API_KEY = llm.fallbackApiKey;
+      applied.push("llm.fallbackApiKey");
+    }
+    if (llm.fallbackModel?.trim()) {
+      process.env.LLM_FALLBACK_MODEL = llm.fallbackModel.trim();
+      applied.push("llm.fallbackModel");
+    }
 
     resetLLMClient();
-    const provider = (process.env.LLM_PROVIDER ?? "ollama").toLowerCase();
-    if (provider === "ollama") {
-      setLLMClient(
-        new OllamaLLMClient(
-          fetch,
-          process.env.LLM_BASE_URL ?? "http://127.0.0.1:11434",
-          process.env.LLM_MODEL ?? "llama3.1",
-        ),
-      );
-    } else if (
-      provider === "openai" ||
-      provider === "openai_compatible" ||
-      provider === "anthropic"
-    ) {
-      // Anthropic via OpenAI-compatible proxies is common locally; raw Anthropic
-      // Messages API is not required for the hackathon heuristic fallback path.
-      setLLMClient(
-        new OpenAICompatibleLLMClient({
-          baseUrl:
-            process.env.LLM_BASE_URL ??
-            (provider === "openai"
-              ? "https://api.openai.com/v1"
-              : "http://127.0.0.1:1234/v1"),
-          model: process.env.LLM_MODEL ?? "gpt-4o-mini",
-          apiKey: process.env.LLM_API_KEY ?? "",
-        }),
-      );
-    } else if (process.env.LLM_BASE_URL) {
-      setLLMClient(new OllamaLLMClient());
-    }
+    setLLMClient(
+      buildLLMClientFromConfig({
+        provider: process.env.LLM_PROVIDER,
+        baseUrl: process.env.LLM_BASE_URL,
+        model: process.env.LLM_MODEL,
+        apiKey: process.env.LLM_API_KEY,
+        fallbackApiKey: process.env.LLM_FALLBACK_API_KEY,
+        fallbackModel: process.env.LLM_FALLBACK_MODEL,
+      }),
+    );
   }
 
   if (applied.length > 0) refreshContextAgent();
@@ -187,6 +177,11 @@ export function applyRequestSecrets(headers: Headers): void {
   const apiKey = headers.get("x-llm-api-key") ?? headers.get("X-LLM-Api-Key");
   const provider =
     headers.get("x-llm-provider") ?? headers.get("X-LLM-Provider");
+  const fallbackApiKey =
+    headers.get("x-llm-fallback-api-key") ??
+    headers.get("X-LLM-Fallback-Api-Key");
+  const fallbackModel =
+    headers.get("x-llm-fallback-model") ?? headers.get("X-LLM-Fallback-Model");
 
   if (
     !firecrawl &&
@@ -195,7 +190,9 @@ export function applyRequestSecrets(headers: Headers): void {
     !baseUrl &&
     !model &&
     !apiKey &&
-    !provider
+    !provider &&
+    !fallbackApiKey &&
+    !fallbackModel
   ) {
     return;
   }
@@ -205,12 +202,14 @@ export function applyRequestSecrets(headers: Headers): void {
     zernioApiKey: zernioKey ?? undefined,
     zernioApiBaseUrl: zernioBase ?? undefined,
     llm:
-      baseUrl || model || apiKey || provider
+      baseUrl || model || apiKey || provider || fallbackApiKey || fallbackModel
         ? {
             provider: provider ?? undefined,
             baseUrl: baseUrl ?? undefined,
             model: model ?? undefined,
             apiKey: apiKey ?? undefined,
+            fallbackApiKey: fallbackApiKey ?? undefined,
+            fallbackModel: fallbackModel ?? undefined,
           }
         : undefined,
   });

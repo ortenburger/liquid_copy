@@ -127,17 +127,40 @@ export async function testLLMConnection(
     }
 
     let sample: string;
-    if (settings.provider === "ollama") {
-      sample = await completeOllama(settings, prompt);
-    } else if (settings.provider === "anthropic") {
-      sample = await completeAnthropic(settings, prompt);
-    } else {
-      sample = await completeOpenAICompatible(settings, prompt);
+    let via = settings.provider;
+    try {
+      if (settings.provider === "ollama") {
+        sample = await completeOllama(settings, prompt);
+      } else if (settings.provider === "anthropic") {
+        sample = await completeAnthropic(settings, prompt);
+      } else {
+        sample = await completeOpenAICompatible(settings, prompt);
+      }
+    } catch (primaryError) {
+      const canFallback =
+        (settings.provider === "ollama" ||
+          settings.provider === "openai_compatible") &&
+        settings.fallbackApiKey.trim();
+      if (!canFallback) throw primaryError;
+      sample = await completeAnthropic(
+        {
+          ...settings,
+          provider: "anthropic",
+          baseUrl: "https://api.anthropic.com",
+          apiKey: settings.fallbackApiKey,
+          model: settings.fallbackModel || "claude-sonnet-4-20250514",
+        },
+        prompt,
+      );
+      via = "anthropic";
     }
 
     return {
       ok: true,
-      message: `Connected via ${settings.provider} · model ${settings.model}`,
+      message:
+        via === settings.provider
+          ? `Connected via ${settings.provider} · model ${settings.model}`
+          : `Primary ${settings.provider} failed — connected via Claude fallback · ${settings.fallbackModel}`,
       sample: sample.trim().slice(0, 400),
       models,
     };
@@ -147,7 +170,7 @@ export async function testLLMConnection(
       ok: false,
       message:
         message.includes("Failed to fetch") || message.includes("NetworkError")
-          ? `${message} — browsers block some cloud APIs with CORS. Prefer Ollama locally, or put a small proxy in front of Claude/OpenAI.`
+          ? `${message} — browsers block some cloud APIs with CORS. Prefer Ollama locally, or put a small proxy in front of Claude/OpenAI. Server-side fallback still works in real mode.`
           : message,
     };
   }

@@ -14,6 +14,12 @@ export interface LLMSettings {
   /** Cloud / compatible API key — stored only in localStorage. */
   apiKey: string;
   temperature: number;
+  /**
+   * Optional Claude key used when primary is Ollama (or a local compatible
+   * server) and the local model is too slow or unreachable.
+   */
+  fallbackApiKey: string;
+  fallbackModel: string;
 }
 
 export interface AppSettings {
@@ -22,6 +28,8 @@ export interface AppSettings {
   /** Liquid Copy agent API origin when dataMode is real. */
   apiBaseUrl: string;
   firecrawlApiKey: string;
+  /** Last company URL ingested from the Knowledge screen. */
+  lastFirecrawlUrl: string;
   /** Zernio analytics API key (Bearer). */
   zernioApiKey: string;
   /** Zernio API origin (no trailing slash). */
@@ -82,6 +90,8 @@ export function defaultLLMSettings(provider: LLMProvider = "ollama"): LLMSetting
     model: preset.defaultModel,
     apiKey: "",
     temperature: 0.4,
+    fallbackApiKey: "",
+    fallbackModel: PROVIDER_PRESETS.anthropic.defaultModel,
   };
 }
 
@@ -96,6 +106,7 @@ export function defaultSettings(): AppSettings {
         "",
       ) ?? DEFAULT_API_BASE_URL,
     firecrawlApiKey: "",
+    lastFirecrawlUrl: "https://",
     zernioApiKey: "",
     zernioApiBaseUrl: "https://api.zernio.com",
     openCarouselBaseUrl: "http://localhost:3000",
@@ -117,6 +128,10 @@ function parseLLM(raw: Partial<LLMSettings> | undefined): LLMSettings {
     apiKey: String(raw?.apiKey ?? ""),
     temperature:
       typeof raw?.temperature === "number" ? raw.temperature : base.temperature,
+    fallbackApiKey: String(raw?.fallbackApiKey ?? ""),
+    fallbackModel: String(
+      raw?.fallbackModel ?? PROVIDER_PRESETS.anthropic.defaultModel,
+    ),
   };
 }
 
@@ -132,6 +147,9 @@ export function loadSettings(): AppSettings {
         dataMode: parsed.dataMode === "real" ? "real" : "simulation",
         apiBaseUrl: String(parsed.apiBaseUrl ?? base.apiBaseUrl).replace(/\/$/, ""),
         firecrawlApiKey: String(parsed.firecrawlApiKey ?? ""),
+        lastFirecrawlUrl: String(
+          parsed.lastFirecrawlUrl ?? base.lastFirecrawlUrl,
+        ),
         zernioApiKey: String(parsed.zernioApiKey ?? ""),
         zernioApiBaseUrl: String(
           parsed.zernioApiBaseUrl ?? base.zernioApiBaseUrl,

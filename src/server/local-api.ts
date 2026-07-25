@@ -28,6 +28,10 @@ import { POST as checkpointPost } from "@/app/api/content-creator-ai/checkpoints
 import { POST as searchPost } from "@/app/api/content-creator-ai/search/route.js";
 import { GET as traceabilityGet } from "@/app/api/content-creator-ai/traceability/[variantId]/route.js";
 import { applyRequestSecrets } from "@/lib/content-creator-ai/api/runtime.js";
+import { startRAGReindexListener } from "@/lib/content-creator-ai/rag/reindex.js";
+
+// Keep the vector index in sync when Context Agent commits KB writes.
+startRAGReindexListener({ delayMs: 0 });
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -113,17 +117,19 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider",
+    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider, X-LLM-Fallback-Api-Key, X-LLM-Fallback-Model",
   "Access-Control-Expose-Headers": "Content-Type",
 };
 
-async function readBody(req: IncomingMessage): Promise<ArrayBuffer | undefined> {
+async function readBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
   }
   if (chunks.length === 0) return undefined;
-  return Buffer.concat(chunks).buffer;
+  // Do NOT use Buffer.concat(...).buffer — pooled ArrayBuffers have a non-zero
+  // byteOffset and would corrupt JSON.parse in Request.json().
+  return Uint8Array.from(Buffer.concat(chunks));
 }
 
 async function toWebRequest(req: IncomingMessage): Promise<Request> {
@@ -140,10 +146,12 @@ async function toWebRequest(req: IncomingMessage): Promise<Request> {
     }
   }
 
-  const init: RequestInit = { method, headers };
+  const init: RequestInit & { duplex?: "half" } = { method, headers };
   if (method !== "GET" && method !== "HEAD") {
     const body = await readBody(req);
-    if (body) init.body = body;
+    if (body && body.byteLength > 0) {
+      init.body = body;
+    }
   }
   return new Request(url, init);
 }

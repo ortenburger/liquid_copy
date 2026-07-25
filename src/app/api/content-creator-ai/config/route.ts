@@ -18,6 +18,8 @@ interface ConfigBody {
     model?: string;
     apiKey?: string;
     temperature?: number;
+    fallbackApiKey?: string;
+    fallbackModel?: string;
   };
 }
 
