@@ -50,6 +50,11 @@ export interface GenerateHypothesisOptions {
    * prior outcomes (Requirement 7.2 exception).
    */
   firstCycle?: boolean;
+  /**
+   * Full Auto retry path: proceed even with 1–2 prior outcomes (still logs a
+   * warning). Does not bypass a missing company/goal/persona.
+   */
+  forceProceed?: boolean;
   /** Patterns with priorityScore 0.0 to avoid (Requirement 7.3). */
   failedPatterns?: ContentPattern[];
   /** Pre-fetched passages; when omitted the RAG layer is queried. */
@@ -257,7 +262,7 @@ export async function generateHypothesis(
 
   if (priorOutcomeCount < MIN_PRIOR_OUTCOMES) {
     const zeroOnFirstCycle = priorOutcomeCount === 0 && firstCycle;
-    if (!zeroOnFirstCycle) {
+    if (!zeroOnFirstCycle && !options.forceProceed) {
       return {
         status: "insufficient_history",
         priorOutcomeCount,
@@ -266,6 +271,11 @@ export async function generateHypothesis(
           `the knowledge base returned ${priorOutcomeCount}. Waiting for more experiment history.`,
         warnings,
       };
+    }
+    if (options.forceProceed && !zeroOnFirstCycle) {
+      warnings.push(
+        `Proceeding with thin experiment history (${priorOutcomeCount} < ${MIN_PRIOR_OUTCOMES}) after retry`,
+      );
     }
   }
 
