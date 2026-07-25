@@ -185,7 +185,7 @@ export class AnthropicLLMClient implements LLMClient {
     const root = (
       this.options.baseUrl ?? "https://api.anthropic.com"
     ).replace(/\/$/, "");
-    const model = this.options.model ?? "claude-sonnet-4-20250514";
+    const model = this.options.model ?? "claude-sonnet-4-6";
 
     for (let attempt = 1; attempt <= attempts; attempt++) {
       if (attempt > 1) await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 2));
@@ -278,7 +278,7 @@ export function buildLLMClientFromConfig(
   const fallbackModel =
     cfg.fallbackModel ??
     process.env.LLM_FALLBACK_MODEL ??
-    "claude-sonnet-4-20250514";
+    "claude-sonnet-4-6";
 
   let primary: LLMClient;
   if (provider === "anthropic") {

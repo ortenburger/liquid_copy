@@ -682,3 +682,211 @@ export async function publishCarouselToZernio(
     dashboardHint: DASHBOARD,
   };
 }
+
+export type ZernioPostStatus =
+  | "draft"
+  | "scheduled"
+  | "published"
+  | "failed"
+  | "publishing"
+  | "partial"
+  | "cancelled"
+  | string;
+
+export interface ZernioQueuedPost {
+  id: string;
+  title: string;
+  content: string;
+  status: ZernioPostStatus;
+  scheduledFor?: string;
+  timezone?: string;
+  platforms: string[];
+  /** Public image URLs from mediaItems (carousel slides). */
+  imageUrls: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ListZernioPostsResult {
+  ok: boolean;
+  posts: ZernioQueuedPost[];
+  message: string;
+  total?: number;
+}
+
+function extractImageUrls(raw: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const u = value.trim();
+    if (!u || !/^https?:\/\//i.test(u)) return;
+    if (urls.includes(u)) return;
+    urls.push(u);
+  };
+
+  const mediaItems = Array.isArray(raw.mediaItems) ? raw.mediaItems : [];
+  for (const item of mediaItems) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const type = String(o.type ?? "image").toLowerCase();
+    if (type && type !== "image" && type !== "photo") continue;
+    push(o.url ?? o.publicUrl ?? o.thumbnailUrl);
+  }
+
+  // Some payloads nest media under platforms[].customMedia
+  const platforms = Array.isArray(raw.platforms) ? raw.platforms : [];
+  for (const p of platforms) {
+    if (!p || typeof p !== "object") continue;
+    const custom = (p as Record<string, unknown>).customMedia;
+    if (!Array.isArray(custom)) continue;
+    for (const item of custom) {
+      if (!item || typeof item !== "object") continue;
+      const o = item as Record<string, unknown>;
+      push(o.url ?? o.publicUrl);
+    }
+  }
+
+  return urls;
+}
+
+function mapZernioPost(raw: Record<string, unknown>): ZernioQueuedPost {
+  const platformsRaw = Array.isArray(raw.platforms) ? raw.platforms : [];
+  const platforms = platformsRaw
+    .map((p) => {
+      if (!p || typeof p !== "object") return "";
+      const o = p as Record<string, unknown>;
+      return String(o.platform ?? "").trim();
+    })
+    .filter(Boolean);
+
+  return {
+    id: String(raw._id ?? raw.id ?? ""),
+    title: String(raw.title ?? "").trim() || "Untitled",
+    content: String(raw.content ?? "").trim(),
+    status: String(raw.status ?? "draft") as ZernioPostStatus,
+    scheduledFor: raw.scheduledFor
+      ? String(raw.scheduledFor)
+      : undefined,
+    timezone: raw.timezone ? String(raw.timezone) : undefined,
+    platforms,
+    imageUrls: extractImageUrls(raw),
+    createdAt: raw.createdAt ? String(raw.createdAt) : undefined,
+    updatedAt: raw.updatedAt ? String(raw.updatedAt) : undefined,
+  };
+}
+
+async function enrichPostMedia(
+  base: string,
+  key: string,
+  post: ZernioQueuedPost,
+): Promise<ZernioQueuedPost> {
+  if (post.imageUrls.length > 0 || !post.id) return post;
+  try {
+    const res = await zernioFetch(base, key, `/posts/${post.id}`);
+    if (!res.ok) return post;
+    const data = (await res.json()) as {
+      post?: Record<string, unknown>;
+    } & Record<string, unknown>;
+    const raw = data.post ?? data;
+    const imageUrls = extractImageUrls(raw);
+    return imageUrls.length > 0 ? { ...post, imageUrls } : post;
+  } catch {
+    return post;
+  }
+}
+
+/**
+ * List posts from Zernio (draft / scheduled / etc).
+ * @see https://docs.zernio.com/posts/list-posts
+ */
+export async function listZernioPosts(options?: {
+  status?: ZernioPostStatus | ZernioPostStatus[];
+  page?: number;
+  limit?: number;
+  accountId?: string;
+  sortBy?: string;
+}): Promise<ListZernioPostsResult> {
+  const base = normalizeZernioApiBase(process.env.ZERNIO_API_BASE);
+  const key = process.env.ZERNIO_API_KEY?.trim();
+  if (!key) {
+    return {
+      ok: false,
+      posts: [],
+      message:
+        "Zernio API key missing. Set it in Settings (real-data mode), Save, then refresh.",
+    };
+  }
+
+  const statuses = Array.isArray(options?.status)
+    ? options!.status
+    : options?.status
+      ? [options.status]
+      : ["draft", "scheduled"];
+
+  const all: ZernioQueuedPost[] = [];
+  let lastError = "";
+
+  for (const status of statuses) {
+    const params = new URLSearchParams({
+      status: String(status),
+      page: String(options?.page ?? 1),
+      limit: String(options?.limit ?? 25),
+      sortBy: options?.sortBy ?? "scheduled-desc",
+    });
+    const accountId =
+      options?.accountId?.trim() || process.env.ZERNIO_ACCOUNT_ID?.trim();
+    if (accountId) params.set("accountId", accountId);
+
+    try {
+      const res = await zernioFetch(base, key, `/posts?${params.toString()}`);
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText);
+        lastError = `List posts (${status}) failed (${res.status}): ${text.slice(0, 180)}`;
+        continue;
+      }
+      const data = (await res.json()) as {
+        posts?: Record<string, unknown>[];
+        pagination?: { total?: number };
+      };
+      const mapped = (data.posts ?? [])
+        .map((p) => mapZernioPost(p))
+        .filter((p) => p.id);
+      all.push(...mapped);
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // De-dupe by id
+  const byId = new Map<string, ZernioQueuedPost>();
+  for (const p of all) byId.set(p.id, p);
+  let posts = [...byId.values()].sort((a, b) => {
+    const ta = new Date(a.scheduledFor || a.createdAt || 0).getTime();
+    const tb = new Date(b.scheduledFor || b.createdAt || 0).getTime();
+    return tb - ta;
+  });
+
+  // List payload sometimes omits mediaItems — hydrate at most 3 via get-post
+  // (avoid Zernio rate limits on refresh).
+  const needMedia = posts.filter((p) => p.imageUrls.length === 0).slice(0, 3);
+  for (const p of needMedia) {
+    const enriched = await enrichPostMedia(base, key, p);
+    if (enriched.imageUrls.length > 0) {
+      posts = posts.map((x) => (x.id === enriched.id ? enriched : x));
+    }
+  }
+
+  if (posts.length === 0 && lastError) {
+    return { ok: false, posts: [], message: lastError };
+  }
+
+  return {
+    ok: true,
+    posts,
+    total: posts.length,
+    message:
+      posts.length === 0
+        ? "No draft or scheduled posts in Zernio."
+        : `${posts.length} post${posts.length === 1 ? "" : "s"} from Zernio.`,
+  };
+}

@@ -285,6 +285,216 @@
   letter-spacing: 0.02em;
 }
 
+.week-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.week-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--outline-hairline);
+  border-radius: var(--radius-lg);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font: var(--text-body);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.week-chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--outline-hairline));
+}
+
+.week-chip.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--outline-hairline));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-container-lowest));
+}
+
+.week-chip--add {
+  border-style: dashed;
+  color: var(--on-surface-variant);
+}
+
+.week-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.week-chip-label {
+  font-weight: 600;
+}
+
+.week-chip-meta {
+  font: var(--text-label-mono);
+  letter-spacing: 0.03em;
+  color: var(--on-surface-variant);
+}
+
+.plan-simple-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.plan-simple-head .page-title {
+  margin: 0;
+}
+
+.plan-simple-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.plan-week-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.plan-week-tab {
+  padding: 6px 12px;
+  border: 1px solid var(--outline-hairline);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-surface-variant);
+  font: var(--text-label-mono);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.plan-week-tab.is-active {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--outline-hairline));
+  color: var(--on-surface);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.plan-simple-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plan-simple-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px;
+  gap: var(--space-md);
+  align-items: center;
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--outline-hairline);
+}
+
+.plan-simple-row:last-child {
+  border-bottom: 1px solid var(--outline-hairline);
+}
+
+.plan-simple-day {
+  display: block;
+  margin-bottom: 4px;
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-surface-variant);
+}
+
+.plan-simple-hook {
+  margin: 0;
+  font: var(--text-body);
+  line-height: 1.4;
+  color: var(--on-surface);
+}
+
+.plan-simple-preview {
+  width: 120px;
+  height: 90px;
+  padding: 0;
+  border: 1px solid var(--outline-hairline);
+  border-radius: var(--radius);
+  background: var(--surface-container);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.plan-simple-preview.is-empty {
+  display: grid;
+  place-items: center;
+  color: var(--on-surface-variant);
+  cursor: default;
+}
+
+.plan-simple-slide {
+  width: 100%;
+  height: 100%;
+}
+
+.zernio-queue {
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--outline-hairline);
+}
+
+.zernio-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-sm);
+}
+
+.zernio-queue-title {
+  margin: 0;
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+
+.zernio-queue-thumbs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.zernio-queue-thumb {
+  width: 72px;
+  height: 72px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--outline-hairline);
+  border-radius: 6px;
+  background: var(--surface-container);
+  overflow: hidden;
+  flex: 0 0 72px;
+}
+
+.zernio-queue-thumb.is-empty {
+  background: color-mix(in srgb, var(--outline-hairline) 35%, transparent);
+}
+
+.zernio-queue-thumb img,
+.zernio-queue-thumb-slide {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.muted {
+  margin: 0 0 var(--space-sm);
+  font: var(--text-label);
+  color: var(--on-surface-variant);
+}
+
 .posting-plan {
   list-style: none;
   margin: 0;
@@ -316,6 +526,96 @@
 
 .insights-rank {
   counter-reset: none;
+}
+
+.insights-analysis {
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--outline-hairline);
+  color: var(--on-surface);
+  font: var(--text-body);
+  line-height: 1.5;
+}
+
+.insights-analysis > :first-child {
+  margin-top: 0;
+}
+
+.insights-analysis > :last-child {
+  margin-bottom: 0;
+}
+
+.insights-analysis h1,
+.insights-analysis h2,
+.insights-analysis h3 {
+  margin: 0.9em 0 0.35em;
+  font: var(--text-body-bold);
+  line-height: 1.3;
+}
+
+.insights-analysis h1 {
+  font-size: 1.1em;
+}
+
+.insights-analysis h2,
+.insights-analysis h3 {
+  font-size: 1em;
+}
+
+.insights-analysis p,
+.insights-analysis ul,
+.insights-analysis ol {
+  margin: 0.4em 0;
+}
+
+.insights-analysis ul,
+.insights-analysis ol {
+  padding-left: 1.2em;
+}
+
+.insights-simple-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.insights-simple-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  gap: var(--space-md);
+  align-items: baseline;
+  padding: var(--space-md) 0;
+  border-top: 1px solid var(--outline-hairline);
+}
+
+.insights-simple-row:last-child {
+  border-bottom: 1px solid var(--outline-hairline);
+}
+
+.insights-simple-index {
+  font: var(--text-label-mono);
+  letter-spacing: 0.04em;
+  color: var(--on-surface-variant);
+}
+
+.insights-simple-hook {
+  margin: 0;
+  font: var(--text-body);
+  line-height: 1.4;
+  color: var(--on-surface);
+}
+
+.insights-simple-angle {
+  margin: 4px 0 0;
+  font: var(--text-body);
+  line-height: 1.35;
+  color: var(--on-surface-variant);
+}
+
+.insights-simple-er {
+  font: var(--text-label-mono);
+  letter-spacing: 0.02em;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
 }
 
 .insights-rank-index {

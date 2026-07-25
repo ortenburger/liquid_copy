@@ -172,6 +172,28 @@ export interface WeekPostingPlan {
   createdAt: string;
 }
 
+/** One week in the rolling content-plan queue (max 4). */
+export type QueuedWeekStatus = "draft" | "active" | "done";
+
+export interface QueuedWeek {
+  id: string;
+  weekStart: string;
+  label: string;
+  status: QueuedWeekStatus;
+  plan: WeekPostingPlan;
+  roadmap?: RoadmapSummary;
+  hypotheses: HypothesisCard[];
+  insightsSnippet?: string;
+  /** KB markdown entity for this week only (never shared across weeks). */
+  planEntityId?: string;
+  createdAt: string;
+}
+
+export interface WeekQueue {
+  weeks: QueuedWeek[];
+  updatedAt: string;
+}
+
 /** Simple UI — Overview history */
 export interface PlanChangeRecord {
   id: string;

@@ -6,7 +6,11 @@ import { Input } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { Toggle } from "../../components/ui/Toggle";
 import { api } from "../../lib/api";
-import { listOllamaModels, testLLMConnection } from "../../lib/llm-browser";
+import {
+  filterChatModels,
+  listOllamaModels,
+  testLLMConnection,
+} from "../../lib/llm-browser";
 import {
   PROVIDER_PRESETS,
   clearSettings,
@@ -52,7 +56,7 @@ export function SettingsPage() {
     setListing(true);
     void listOllamaModels(llm.baseUrl)
       .then((names) => {
-        if (!cancelled) setModels(names);
+        if (!cancelled) setModels(filterChatModels(names));
       })
       .catch(() => {
         if (!cancelled) setModels([]);
@@ -502,9 +506,9 @@ export function SettingsPage() {
               />
             </div>
             <p className="settings-note">
-              Primary stays local. If Ollama does not answer within ~8s, the API
-              retries the same prompt on Claude. Synced to the local API when you
-              Save in real-data mode.
+              Primary stays local (up to ~3 minutes per call when cold). If Ollama
+              fails or times out, the same prompt retries on Claude. Save settings
+              in real-data mode to sync keys to the local API.
             </p>
           </div>
         ) : null}

@@ -26,13 +26,34 @@ import {
 import {
   CENTRAL_PLAN_ENTITY_ID,
   formatCentralPlanMarkdown,
+  formatWeekPlanIndexMarkdown,
   parseCentralPlanMarkdown,
+  weekPlanEntityId,
 } from "./central-plan";
 import {
+  loadInsightsAnalysis,
+  loadInsightsExtract,
+  saveInsightsAnalysis,
+  saveInsightsExtract,
+} from "./insights-analysis-store";
+import {
+  buildQueuedWeek,
+  clearSevenDayPlanSnapshot,
+  clearWeekPostingPlan,
+  clearWeekQueue,
+  ensureUniqueWeekStart,
+  formatPriorWeeksForPrompt,
+  formatWeekLabel,
+  getQueuedWeek,
   loadSevenDayPlanSnapshot,
   loadWeekPostingPlan,
+  loadWeekQueue,
+  nextWeekStartFromQueue,
+  removeQueuedWeek,
   saveSevenDayPlanSnapshot,
   saveWeekPostingPlan,
+  upsertQueuedWeek,
+  weekIdFromStart,
 } from "./posting-plan-store";
 import {
   getApiBaseUrl,
@@ -42,6 +63,7 @@ import {
 } from "./settings";
 import { PLAN_CHECKPOINT_STAGES } from "./simple-ui-nav";
 import {
+  listSimulatedPublishes,
   recordSimulatedPublish,
   simulatedPublishesToAnalyticsRows,
   simulatedPublishesToExperimentCards,
@@ -61,12 +83,14 @@ import type {
   OrgProfile,
   PlanChangeRecord,
   PostingPlanSlot,
+  QueuedWeek,
   RAGPassage,
   RetrievalScope,
   RoadmapSummary,
   SocialPlatform,
   StageRecord,
   WeekPostingPlan,
+  WeekQueue,
   WorkflowStage,
   WorkflowStatus,
 } from "./types";
@@ -85,6 +109,16 @@ function startOfToday(d = new Date()): Date {
   const date = new Date(d);
   date.setHours(10, 0, 0, 0);
   return date;
+}
+
+/** Monday of the upcoming content week (this Monday if today is Monday, else next). */
+function startOfNextContentWeek(d = new Date()): Date {
+  const monday = startOfWeekMonday(d);
+  const today = startOfToday(d);
+  if (today.getTime() <= monday.getTime()) return monday;
+  const next = new Date(monday);
+  next.setDate(monday.getDate() + 7);
+  return next;
 }
 
 function aspectForPlatform(
@@ -110,6 +144,91 @@ function normalizePlanPlatform(raw: unknown): SocialPlatform {
   if (p === "twitter") return "x";
   if ((PLAN_PLATFORMS as string[]).includes(p)) return p as SocialPlatform;
   return "linkedin";
+}
+
+function normalizeHookText(hook: string): string {
+  return hook
+    .toLowerCase()
+    .replace(/\W+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hooksCollide(a: string, b: string, threshold = 0.55): boolean {
+  const na = normalizeHookText(a);
+  const nb = normalizeHookText(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.length > 16 && nb.includes(na)) return true;
+  if (nb.length > 16 && na.includes(nb)) return true;
+  const ta = new Set(na.split(" ").filter((w) => w.length > 3));
+  const tb = new Set(nb.split(" ").filter((w) => w.length > 3));
+  if (ta.size === 0 || tb.size === 0) return false;
+  let overlap = 0;
+  for (const w of ta) if (tb.has(w)) overlap += 1;
+  const ratio = overlap / Math.min(ta.size, tb.size);
+  return ratio >= threshold;
+}
+
+const WEEK_PIVOTS = [
+  "buyer objection",
+  "proof / evidence",
+  "time-to-value",
+  "cost of inaction",
+  "operator workflow",
+  "before vs after",
+  "risk reduction",
+] as const;
+
+/**
+ * Namespace hyp ids to the week and rewrite any hooks that collide with
+ * prior weeks (or each other) so Next week cannot clone This week.
+ */
+function bindHypothesesToWeek(
+  hyps: HypothesisCard[],
+  weekId: string,
+  weekIndex: number,
+  priorHooks: string[],
+): HypothesisCard[] {
+  const banned = priorHooks.map(normalizeHookText).filter((h) => h.length > 8);
+  const seen: string[] = [];
+  const stamp = Date.now().toString(36);
+  return hyps.slice(0, 7).map((h, i) => {
+    let hook = h.hook.trim();
+    let title = (h.title ?? hook).trim();
+    let angle = h.angle?.trim();
+    const pivot = WEEK_PIVOTS[i % WEEK_PIVOTS.length]!;
+    const collidesPrior = banned.some((p) => hooksCollide(hook, p, 0.5));
+    const collidesSelf = seen.some((p) => hooksCollide(hook, p, 0.5));
+    if (collidesPrior || collidesSelf) {
+      hook = `W${weekIndex} · ${pivot}: ${hook}`.slice(0, 180);
+      title = `${title} · ${pivot}`.slice(0, 72);
+      angle = [
+        angle,
+        `Week ${weekIndex} pivot: ${pivot} — must not reuse prior-week wording.`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    } else if (weekIndex > 1) {
+      // Even when hooks look fresh, stamp week so decks/names cannot collide.
+      title = `W${weekIndex}: ${title}`.slice(0, 72);
+      angle = [
+        angle,
+        `Fresh week-${weekIndex} test (${pivot}) — new proof point, not a rehash.`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
+    seen.push(normalizeHookText(hook));
+    return {
+      ...h,
+      id: `hyp-${weekId}-${stamp}-${i}`,
+      title,
+      hook,
+      angle,
+      status: "queued" as const,
+    };
+  });
 }
 
 function parseHypothesesJson(raw: string): HypothesisCard[] {
@@ -162,6 +281,94 @@ function rankAnalyticsRow(row: AnalyticsRow) {
   return row.engagementRate * 1000 + row.impressions / 1_000_000;
 }
 
+/** Rows that actually have measured performance (not zeroed stubs / KB fillers). */
+function measuredAnalyticsRows(analytics: AnalyticsSummary): AnalyticsRow[] {
+  return analytics.rows.filter(
+    (r) =>
+      r.impressions > 0 ||
+      (r.engagementRate > 0 &&
+        !r.id.startsWith("kb-") &&
+        r.status !== "queued" &&
+        r.status !== "draft"),
+  );
+}
+
+/**
+ * True when there is enough post-level performance data to analyze winners.
+ * Requires at least 2 measured posts (or a clear non-inconclusive set).
+ */
+function assessAnalyticsSufficiency(analytics: AnalyticsSummary): {
+  enough: boolean;
+  measuredCount: number;
+  totalRows: number;
+  reason: string;
+} {
+  const measured = measuredAnalyticsRows(analytics);
+  const totalRows = analytics.rows.length;
+  if (totalRows === 0) {
+    return {
+      enough: false,
+      measuredCount: 0,
+      totalRows: 0,
+      reason: "No analytics rows yet — nothing has been published or tracked.",
+    };
+  }
+  if (analytics.inconclusive || measured.length === 0) {
+    return {
+      enough: false,
+      measuredCount: 0,
+      totalRows,
+      reason:
+        "Posts exist, but none have measured impressions/engagement yet (data is inconclusive).",
+    };
+  }
+  if (measured.length < 2) {
+    return {
+      enough: false,
+      measuredCount: measured.length,
+      totalRows,
+      reason: `Only ${measured.length} post with metrics — need at least 2 measured posts to compare winners vs the rest.`,
+    };
+  }
+  return {
+    enough: true,
+    measuredCount: measured.length,
+    totalRows,
+    reason: "",
+  };
+}
+
+function insufficientAnalyticsMarkdown(
+  kind: "analysis" | "extract",
+  analytics: AnalyticsSummary,
+): string {
+  const check = assessAnalyticsSufficiency(analytics);
+  const title =
+    kind === "extract"
+      ? "# Performing playbook"
+      : "# Insights · week steering";
+  const section =
+    kind === "extract" ? "## Not enough data to name winners" : "## Not enough analytics data";
+  const lines = [
+    title,
+    "",
+    section,
+    "",
+    check.reason || "Not enough analytics data to draw reliable conclusions.",
+    "",
+    `- Rows loaded: ${check.totalRows}`,
+    `- Posts with measured metrics: ${check.measuredCount}`,
+  ];
+  if (analytics.summary?.trim()) {
+    lines.push(`- Note: ${analytics.summary.trim()}`);
+  }
+  lines.push(
+    "",
+    "**What to do:** Publish (or Simulate Zernio) at least a couple of carousels, wait for impressions/engagement, then run this again.",
+  );
+  return lines.join("\n");
+}
+
 function formatAnalyticsForPrompt(analytics: AnalyticsSummary): string {
   const ranked = [...analytics.rows].sort(
     (a, b) => rankAnalyticsRow(b) - rankAnalyticsRow(a),
@@ -184,6 +391,43 @@ function formatAnalyticsForPrompt(analytics: AnalyticsSummary): string {
     "",
     "Underperformers / avoid:",
     low.length ? low.map(fmt).join("\n") : "(none flagged)",
+  ].join("\n");
+}
+
+function fallbackPerformersExtract(analytics: AnalyticsSummary): string {
+  const ranked = [...analytics.rows]
+    .filter((r) => r.status !== "failed")
+    .sort((a, b) => rankAnalyticsRow(b) - rankAnalyticsRow(a));
+  const top = ranked.slice(0, 5);
+  const angles = new Map<string, AnalyticsRow>();
+  for (const row of ranked) {
+    const key = (row.angle ?? "").trim();
+    if (!key) continue;
+    const prev = angles.get(key);
+    if (!prev || rankAnalyticsRow(row) > rankAnalyticsRow(prev)) {
+      angles.set(key, row);
+    }
+  }
+  const topAngles = [...angles.values()].slice(0, 5);
+
+  return [
+    `# Performing playbook`,
+    ``,
+    `## Copy & ideas that work`,
+    ...(top.length
+      ? top.map(
+          (r) =>
+            `- **${r.hook}**${r.angle ? ` — ${r.angle}` : ""} · ER ${(r.engagementRate * 100).toFixed(1)}%`,
+        )
+      : ["- No clear winners yet — publish more tests."]),
+    ``,
+    `## Angles that work`,
+    ...(topAngles.length
+      ? topAngles.map(
+          (r) =>
+            `- **${r.angle}** (via “${r.hook}”) · ER ${(r.engagementRate * 100).toFixed(1)}%`,
+        )
+      : ["- No angles linked to performance yet."]),
   ].join("\n");
 }
 
@@ -251,6 +495,7 @@ const SCOPE_TO_ENTITY_TYPE: Record<RetrievalScope, KBEntitySummary["entityType"]
 
 const MAX_MD_CHARS = 10_000;
 const INSIGHTS_LATEST_ENTITY_ID = "insights-latest";
+const INSIGHTS_EXTRACT_ENTITY_ID = "insights-performers";
 
 function guessEntityType(entityId: string): KBWriteEntityType {
   const id = entityId.toLowerCase();
@@ -262,7 +507,12 @@ function guessEntityType(entityId: string): KBWriteEntityType {
   ) {
     return "audience";
   }
-  if (id.startsWith("experiment") || id.includes("experiment")) {
+  if (
+    id.startsWith("experiment") ||
+    id.includes("experiment") ||
+    id.startsWith("insights") ||
+    id.includes("insights")
+  ) {
     return "experiment";
   }
   return "company_identity";
@@ -870,11 +1120,23 @@ export const api = {
 
   async gatherRagMarkdownContext(
     query: string,
-    options?: { scope?: RetrievalScope; limit?: number },
+    options?: {
+      scope?: RetrievalScope;
+      limit?: number;
+      /** Skip these KB entities (e.g. testing-plan when inventing a new week). */
+      excludeEntityIds?: string[];
+      /**
+       * Drop all testing-plan* docs from markdown gather (default true).
+       * Prevents week N from being regenerated as a copy of week N-1's MD.
+       */
+      excludePlanDocuments?: boolean;
+    },
   ): Promise<{
     passages: RAGPassage[];
     markdownSources: RagMarkdownSource[];
   }> {
+    const excluded = new Set(options?.excludeEntityIds ?? []);
+    const excludePlanDocs = options?.excludePlanDocuments !== false;
     const passages = await this.search(query, {
       scope: options?.scope,
       limit: options?.limit ?? 6,
@@ -882,24 +1144,41 @@ export const api = {
 
     const entities = await this.listKBEntities().catch(() => []);
     const candidateIds = new Set<string>();
+    const isPlanDoc = (id: string) =>
+      id === CENTRAL_PLAN_ENTITY_ID || id.startsWith("testing-plan");
+
+    // Always prefer Insights markdown docs when present (plan + chat grounding).
+    candidateIds.add(INSIGHTS_EXTRACT_ENTITY_ID);
+    candidateIds.add(INSIGHTS_LATEST_ENTITY_ID);
 
     for (const p of passages) {
       for (const id of guessEntityIdsFromPassage(p.sourceDoc)) {
+        if (excludePlanDocs && isPlanDoc(id)) continue;
         candidateIds.add(id);
       }
     }
 
     for (const entity of entities) {
+      if (excluded.has(entity.entityId)) continue;
+      if (excludePlanDocs && isPlanDoc(entity.entityId)) continue;
       const hitBySource = passages.some(
         (p) =>
           p.sourceDoc.includes(entity.entityId) ||
           entity.entityId.includes(p.sourceDoc.replace(/_v\d+$/i, "")),
       );
       if (hitBySource) candidateIds.add(entity.entityId);
+      if (
+        entity.entityId.startsWith("insights") ||
+        entity.entityType === "experiment"
+      ) {
+        candidateIds.add(entity.entityId);
+      }
     }
 
     for (const entity of entities) {
-      if (candidateIds.size >= 4) break;
+      if (candidateIds.size >= 8) break;
+      if (excluded.has(entity.entityId)) continue;
+      if (excludePlanDocs && isPlanDoc(entity.entityId)) continue;
       if (
         options?.scope &&
         entity.entityType !== SCOPE_TO_ENTITY_TYPE[options.scope]
@@ -909,19 +1188,37 @@ export const api = {
       candidateIds.add(entity.entityId);
     }
 
+    // Prefer real company identity — never any testing-plan* document.
     for (const entity of entities) {
-      if (entity.entityType === "company_identity") {
-        candidateIds.add(entity.entityId);
-        break;
+      if (entity.entityType !== "company_identity") continue;
+      if (isPlanDoc(entity.entityId) || excluded.has(entity.entityId)) {
+        continue;
+      }
+      candidateIds.add(entity.entityId);
+      break;
+    }
+
+    for (const id of excluded) candidateIds.delete(id);
+    if (excludePlanDocs) {
+      for (const id of [...candidateIds]) {
+        if (isPlanDoc(id)) candidateIds.delete(id);
       }
     }
 
     const markdownSources: RagMarkdownSource[] = [];
     let mdBudget = MAX_MD_CHARS;
+    const pinnedInsights = new Set([
+      INSIGHTS_EXTRACT_ENTITY_ID,
+      INSIGHTS_LATEST_ENTITY_ID,
+    ]);
     for (const entityId of candidateIds) {
-      if (mdBudget <= 0 || markdownSources.length >= 5) break;
+      if (excluded.has(entityId)) continue;
+      if (excludePlanDocs && isPlanDoc(entityId)) continue;
+      if (mdBudget <= 0 || markdownSources.length >= 6) break;
       const known = entities.find((e) => e.entityId === entityId);
+      const isPinned = pinnedInsights.has(entityId);
       if (
+        !isPinned &&
         entities.length > 0 &&
         !known &&
         !passages.some((p) => p.sourceDoc.includes(entityId))
@@ -938,7 +1235,7 @@ export const api = {
         mdBudget -= clipped.length;
         markdownSources.push({
           entityId: doc.entityId,
-          entityType: known?.entityType ?? doc.entityType,
+          entityType: known?.entityType ?? doc.entityType ?? "experiment",
           markdown: clipped,
         });
       } catch {
@@ -947,6 +1244,62 @@ export const api = {
     }
 
     return { passages, markdownSources };
+  },
+
+  /**
+   * Load Insights markdown for Plan: performers extract + analysis.
+   * Prefers local cache, then KB entities.
+   */
+  async loadInsightsPlanContext(): Promise<{
+    combined: string;
+    analysis: string;
+    performers: string;
+    source: "local" | "kb" | "mixed" | "none";
+  }> {
+    const localAnalysis = loadInsightsAnalysis()?.markdown?.trim() ?? "";
+    const localPerformers = loadInsightsExtract()?.markdown?.trim() ?? "";
+
+    let kbAnalysis = "";
+    let kbPerformers = "";
+    try {
+      const [analysisDoc, performersDoc] = await Promise.all([
+        this.getKBEntity(INSIGHTS_LATEST_ENTITY_ID),
+        this.getKBEntity(INSIGHTS_EXTRACT_ENTITY_ID),
+      ]);
+      if (analysisDoc.found && analysisDoc.markdown?.trim()) {
+        kbAnalysis = analysisDoc.markdown.trim();
+      }
+      if (performersDoc.found && performersDoc.markdown?.trim()) {
+        kbPerformers = performersDoc.markdown.trim();
+      }
+    } catch {
+      // local-only is fine
+    }
+
+    const analysis = localAnalysis || kbAnalysis;
+    const performers = localPerformers || kbPerformers;
+    const parts: string[] = [];
+    if (performers) {
+      parts.push(`### Performing playbook\n${performers}`);
+    }
+    if (analysis) {
+      parts.push(`### Insights analysis\n${analysis}`);
+    }
+    const combined = parts.join("\n\n").trim();
+    const usedLocal = Boolean(localAnalysis || localPerformers);
+    const usedKb = Boolean(
+      (!localAnalysis && kbAnalysis) || (!localPerformers && kbPerformers),
+    );
+    const source =
+      !combined
+        ? "none"
+        : usedLocal && usedKb
+          ? "mixed"
+          : usedLocal
+            ? "local"
+            : "kb";
+
+    return { combined, analysis, performers, source };
   },
 
   /**
@@ -1892,6 +2245,8 @@ Answer:`;
     if (!slides || slides.length < 4) {
       const gathered = await this.gatherRagMarkdownContext(idea, {
         limit: 4,
+        // Do not ground new decks on a prior week's plan markdown.
+        excludePlanDocuments: true,
       }).catch(() => ({ passages: [], markdownSources: [] }));
       const context = [
         ...gathered.markdownSources.map(
@@ -1950,6 +2305,17 @@ Answer:`;
     onProgress?: (msg: string) => void;
     /** Week-steering insights markdown (injected into hyp prompt). */
     insightsMarkdown?: string;
+    /** Absolute start date for the 7-day schedule. */
+    weekStartDate?: Date;
+    /**
+     * Hooks/titles already planned in other weeks — model must not reuse.
+     * Built via formatPriorWeeksForPrompt.
+     */
+    priorWeeksExclusion?: string;
+    /** 1-based week index in the queue (for varied RAG seeding). */
+    weekIndex?: number;
+    /** Stable week id — drives hyp ids + per-week markdown entity. */
+    weekId?: string;
   }): Promise<{
     plan: WeekPostingPlan;
     carousels: OpenCarouselItem[];
@@ -1958,10 +2324,31 @@ Answer:`;
     markdown: string;
   }> {
     const llm = loadSettings().llm;
+    const weekIndex = Math.max(1, options?.weekIndex ?? 1);
+    const priorBlock = options?.priorWeeksExclusion?.trim() ?? "";
+    const weekStart =
+      options?.weekStartDate ??
+      (() => {
+        const d = new Date();
+        d.setHours(10, 0, 0, 0);
+        return d;
+      })();
+    const weekId =
+      options?.weekId?.trim() || weekIdFromStart(weekStart.toISOString());
     options?.onProgress?.("Retrieving RAG + KB context…");
+    // Vary the retrieval seed so week N+1 doesn't get the exact same passages.
+    const ragQuery =
+      weekIndex <= 1
+        ? "content experiment hypotheses hooks audience platforms next seven days"
+        : `fresh content experiments week ${weekIndex} alternate hooks angles audience objections proof points platforms`;
     const { passages, markdownSources } = await this.gatherRagMarkdownContext(
-      "content experiment hypotheses hooks audience platforms next seven days",
-      { limit: 8 },
+      ragQuery,
+      {
+        limit: 8,
+        // Never feed any prior week plan markdown back into the next week.
+        excludePlanDocuments: true,
+        excludeEntityIds: [CENTRAL_PLAN_ENTITY_ID, weekPlanEntityId(weekId)],
+      },
     );
 
     const passageBlock =
@@ -1983,21 +2370,32 @@ Answer:`;
       ? options.insightsMarkdown.trim().slice(0, 3500)
       : "(No prior insights analysis — invent from RAG/KB only.)";
 
+    const exclusionSection = priorBlock
+      ? `Already planned (DO NOT reuse, paraphrase, or lightly reword these hooks/titles/angles — invent NEW tests that extend the playbook in a different direction):
+${priorBlock}
+
+`
+      : "";
+
     options?.onProgress?.(
       `Drafting 7 hypotheses with ${llm.provider}/${llm.model}…`,
     );
-    const prompt = `You are Liquid Copy's experimentation planner. Using the company context and insights analysis below, invent exactly 7 distinct content hypotheses to test over the next 7 days (one per day).
+
+    const buildPrompt = (harder: boolean) =>
+      `You are Liquid Copy's experimentation planner. Using the Insights markdown (performing copy/angles + analysis) and company context below, invent exactly 7 distinct content hypotheses to test over the next 7 days (one per day). This is week ${weekIndex} of the content queue — make it materially different from prior weeks.
 
 Return ONLY a JSON array (no prose) of 7 objects:
 [{"title":"short name","hook":"scroll-stopping first line","angle":"why this might win","platform":"linkedin|instagram|tiktok|threads|x"}]
 
 Rules:
+- Prefer themes from the Performing playbook and Insights analysis — extend winners with NEW hooks, do not copy prior week wording
 - Hooks must be specific to this company/audience, not generic marketing fluff
-- Double down on what the insights say is working; avoid underperformers
+- Avoid underperformers called out in the analysis
 - Vary platforms when context allows; default linkedin
 - Each hypothesis must be testable in a short carousel
+- All 7 hooks must be distinct from each other${harder ? "\n- CRITICAL: previous output was too similar to Already planned — rewrite every hook with different opening words, proof points, and angles" : ""}
 
-Insights analysis (week steering):
+${exclusionSection}Insights markdown (performers + analysis):
 ${insightsBlock}
 
 RAG passages:
@@ -2008,16 +2406,60 @@ ${markdownBlock}
 
 JSON:`;
 
+    const priorHooks = priorBlock
+      .split("\n")
+      .map((line) =>
+        line
+          .replace(/^- \[[^\]]+\]\s*/, "")
+          .replace(/^[^—]*—\s*/, "")
+          .replace(/\s*\(.*\)\s*$/, "")
+          .toLowerCase()
+          .replace(/\W+/g, " ")
+          .trim(),
+      )
+      .filter((h) => h.length > 12);
+
+    const countCollisions = (hyps: HypothesisCard[]): number => {
+      if (priorHooks.length === 0) return 0;
+      let n = 0;
+      for (const h of hyps) {
+        const norm = h.hook
+          .toLowerCase()
+          .replace(/\W+/g, " ")
+          .trim();
+        if (
+          priorHooks.some(
+            (p) =>
+              p === norm ||
+              (p.length > 20 && norm.includes(p.slice(0, 40))) ||
+              (norm.length > 20 && p.includes(norm.slice(0, 40))),
+          )
+        ) {
+          n += 1;
+        }
+      }
+      return n;
+    };
+
     let hypotheses: HypothesisCard[] = [];
     try {
-      const raw = await completeWithSettings(llm, prompt);
+      const raw = await completeWithSettings(llm, buildPrompt(false));
       hypotheses = parseHypothesesJson(raw);
+      if (priorHooks.length > 0 && countCollisions(hypotheses) >= 3) {
+        options?.onProgress?.(
+          "Prior week overlap — regenerating distinct hooks…",
+        );
+        const retry = await completeWithSettings(llm, buildPrompt(true));
+        const retried = parseHypothesesJson(retry);
+        if (retried.length > 0) hypotheses = retried;
+      }
     } catch {
       hypotheses = [];
     }
 
     if (hypotheses.length === 0) {
       // Fallback: derive hooks from top RAG snippets so the UI still fills.
+      // Offset seeds by weekIndex so week 2 doesn't clone week 1's fallback.
       const seeds =
         passages.length > 0
           ? passages.slice(0, 7)
@@ -2027,17 +2469,27 @@ JSON:`;
               similarityScore: 0,
               scope: "identity" as const,
             }));
+      const seedOffset = Math.max(0, weekIndex - 1);
       hypotheses = Array.from({ length: 7 }, (_, i) => {
-        const seed = seeds[i % Math.max(seeds.length, 1)];
+        const seed =
+          seeds.length > 0
+            ? seeds[(i + seedOffset) % seeds.length]
+            : undefined;
         const snippet =
           seed && "content" in seed
             ? String(seed.content).replace(/\s+/g, " ").trim().slice(0, 100)
             : "Prove one concrete claim this week";
+        const pivot = WEEK_PIVOTS[i % WEEK_PIVOTS.length]!;
         return {
-          id: `hyp-7d-fallback-${Date.now().toString(36)}-${i}`,
-          title: `Day ${i + 1} test`,
-          hook: snippet.endsWith("?") ? snippet : `${snippet}?`,
-          angle: "Derived from knowledge base when the model returned no JSON.",
+          id: `hyp-fallback-${weekId}-${i}`,
+          title: `W${weekIndex} day ${i + 1} · ${pivot}`,
+          hook:
+            weekIndex > 1
+              ? `W${weekIndex} · ${pivot}: ${snippet.endsWith("?") ? snippet : `${snippet}?`}`
+              : snippet.endsWith("?")
+                ? snippet
+                : `${snippet}?`,
+          angle: `Derived from knowledge base when the model returned no JSON (${pivot}).`,
           platform: PLAN_PLATFORMS[i % PLAN_PLATFORMS.length]!,
           status: "queued" as const,
         };
@@ -2046,16 +2498,24 @@ JSON:`;
 
     while (hypotheses.length < 7) {
       const i = hypotheses.length;
+      const pivot = WEEK_PIVOTS[i % WEEK_PIVOTS.length]!;
       hypotheses.push({
-        id: `hyp-7d-pad-${Date.now().toString(36)}-${i}`,
-        title: `Day ${i + 1} test`,
-        hook: "What if we named the friction your buyers feel every Monday?",
+        id: `hyp-pad-${weekId}-${i}`,
+        title: `W${weekIndex} day ${i + 1} · ${pivot}`,
+        hook: `W${weekIndex} · ${pivot}: What friction should we name for buyers this week?`,
         angle: "Pad slot so the week has one carousel per day.",
         platform: PLAN_PLATFORMS[i % PLAN_PLATFORMS.length]!,
         status: "queued",
       });
     }
-    hypotheses = hypotheses.slice(0, 7);
+
+    // Bind to this week only — new ids, rewrite collisions with prior weeks.
+    hypotheses = bindHypothesesToWeek(
+      hypotheses.slice(0, 7),
+      weekId,
+      weekIndex,
+      priorHooks,
+    );
 
     const roadmap = roadmapFromSevenDayHyps(hypotheses);
     // Persist locally — do not require workflow checkpoints (RoadmapReview idle).
@@ -2066,6 +2526,11 @@ JSON:`;
       onProgress: options?.onProgress,
       hypotheses,
       startFrom: "today",
+      weekStartDate: weekStart,
+      persistLegacy: false,
+      weekId,
+      weekIndex,
+      forceNewCarousels: true,
     });
 
     return {
@@ -2084,11 +2549,22 @@ JSON:`;
     hypotheses?: HypothesisCard[];
     /** Schedule from today (next 7 days) or from Monday. Default monday. */
     startFrom?: "today" | "monday";
+    /** Absolute start date (overrides startFrom when set). */
+    weekStartDate?: Date;
+    /** Also mirror into legacy single-week key. Default true. */
+    persistLegacy?: boolean;
+    /** Stable week id for per-week markdown + hyp namespacing. */
+    weekId?: string;
+    weekIndex?: number;
+    /** Always create new Open Carrusel decks (never reuse prior-week carousels). */
+    forceNewCarousels?: boolean;
   }): Promise<{
     plan: WeekPostingPlan;
     carousels: OpenCarouselItem[];
     hypotheses: HypothesisCard[];
     markdown: string;
+    planEntityId: string;
+    weekId: string;
   }> {
     const loaded = options?.hypotheses?.length
       ? { hypotheses: options.hypotheses }
@@ -2104,8 +2580,20 @@ JSON:`;
       (h) => h.status !== "won" && h.status !== "failed",
     );
     const selected = (testable.length > 0 ? testable : hypotheses).slice(0, 7);
-    const weekStart =
-      options?.startFrom === "today" ? startOfToday() : startOfWeekMonday();
+    const weekStart = options?.weekStartDate
+      ? (() => {
+          const d = new Date(options.weekStartDate!);
+          d.setHours(10, 0, 0, 0);
+          return d;
+        })()
+      : options?.startFrom === "today"
+        ? startOfToday()
+        : startOfWeekMonday();
+    const weekId =
+      options?.weekId?.trim() || weekIdFromStart(weekStart.toISOString());
+    const weekIndex = Math.max(1, options?.weekIndex ?? 1);
+    const planEntityId = weekPlanEntityId(weekId);
+    const forceNew = options?.forceNewCarousels !== false;
     const slots: PostingPlanSlot[] = [];
     const carousels: OpenCarouselItem[] = [];
 
@@ -2124,11 +2612,27 @@ JSON:`;
         `Carousel ${i + 1}/${selected.length}: ${hyp.title ?? hyp.hook}`,
       );
 
-      let carousel = findQueuedByHypothesisId(hyp.id);
+      // Never reuse another week's deck — prior bug reused identical carousels.
+      let carousel =
+        forceNew ? undefined : findQueuedByHypothesisId(hyp.id);
       if (!carousel) {
-        const idea = [hyp.hook, hyp.angle].filter(Boolean).join(" — ");
-        const name = hyp.title?.trim() || hyp.hook.slice(0, 64);
-        const slides = briefsFromIdea(idea, name, { platform: hyp.platform });
+        const idea = [
+          `Week ${weekIndex} (${weekId})`,
+          hyp.hook,
+          hyp.angle,
+        ]
+          .filter(Boolean)
+          .join(" — ");
+        const name = (
+          weekIndex > 1
+            ? `W${weekIndex}: ${hyp.title?.trim() || hyp.hook}`
+            : hyp.title?.trim() || hyp.hook
+        ).slice(0, 64);
+        // Week 2+ skips deterministic briefs so decks cannot clone week 1 HTML.
+        const slides =
+          weekIndex <= 1
+            ? briefsFromIdea(idea, name, { platform: hyp.platform })
+            : undefined;
         carousel = await this.queueCarouselFromIdea({
           idea,
           name,
@@ -2145,7 +2649,7 @@ JSON:`;
 
       carousels.push(carousel);
       slots.push({
-        id: `slot-${hyp.id}`,
+        id: `slot-${weekId}-${dayIndex}`,
         hypothesisId: hyp.id,
         dayIndex,
         dayLabel,
@@ -2159,43 +2663,133 @@ JSON:`;
 
     const plan: WeekPostingPlan = {
       weekStart: weekStart.toISOString(),
-      summary: `${slots.length} hypothesis test${slots.length === 1 ? "" : "s"} over the next 7 days — one carousel each.`,
+      summary: `${slots.length} hypothesis test${slots.length === 1 ? "" : "s"} over 7 days — one carousel each. (${weekId})`,
       slots,
       createdAt: new Date().toISOString(),
     };
-    saveWeekPostingPlan(plan);
+    if (options?.persistLegacy !== false) {
+      saveWeekPostingPlan(plan);
+    }
 
-    options?.onProgress?.("Saving central plan document (testing-plan.md)…");
+    const weekLabel = formatWeekLabel(plan.weekStart);
+    options?.onProgress?.(
+      `Saving week plan document (${planEntityId})…`,
+    );
     const markdown = formatCentralPlanMarkdown({
       plan,
       hypotheses,
       carousels,
+      weekId,
+      weekLabel,
     });
     try {
+      // Per-week source of truth — never overwrite another week's MD.
+      await this.saveToRag({
+        entityId: planEntityId,
+        entityType: "experiment",
+        markdown,
+        append: false,
+      });
+
+      // Index pointer only (not the week body).
+      const queue = loadWeekQueue();
+      const indexWeeks = [
+        ...queue.weeks
+          .filter((w) => w.id !== weekId)
+          .map((w) => ({
+            id: w.id,
+            label: w.label,
+            weekStart: w.weekStart,
+            planEntityId: w.planEntityId ?? weekPlanEntityId(w.id),
+          })),
+        {
+          id: weekId,
+          label: weekLabel,
+          weekStart: plan.weekStart,
+          planEntityId,
+        },
+      ];
       await this.saveToRag({
         entityId: CENTRAL_PLAN_ENTITY_ID,
-        entityType: "company_identity",
-        markdown,
+        entityType: "experiment",
+        markdown: formatWeekPlanIndexMarkdown(indexWeeks),
         append: false,
       });
     } catch {
       // Plan UI still works from localStorage if KB write fails.
     }
 
-    return { plan, carousels, hypotheses, markdown };
+    return {
+      plan,
+      carousels,
+      hypotheses,
+      markdown,
+      planEntityId,
+      weekId,
+    };
   },
 
-  getWeekPostingPlan(): {
-    plan: WeekPostingPlan | null;
+  getWeekQueue(): {
+    queue: WeekQueue;
+    selected: QueuedWeek | null;
     carousels: OpenCarouselItem[];
   } {
-    const plan = loadWeekPostingPlan();
-    if (!plan) return { plan: null, carousels: [] };
+    const queue = loadWeekQueue();
+    const selected = getQueuedWeek(queue);
     const byId = new Map(listQueuedCarousels().map((c) => [c.id, c]));
-    const carousels = plan.slots
+    const carousels = selected
+      ? selected.plan.slots
+          .map((s) => byId.get(s.carouselId))
+          .filter((c): c is OpenCarouselItem => Boolean(c))
+      : [];
+    return { queue, selected, carousels };
+  },
+
+  /**
+   * Remove a week plan (or clear the whole queue) so Plan can be rebuilt cleanly.
+   */
+  clearWeekPlan(weekId?: string): {
+    queue: WeekQueue;
+    selected: QueuedWeek | null;
+    carousels: OpenCarouselItem[];
+  } {
+    if (!weekId) {
+      clearWeekQueue();
+      clearWeekPostingPlan();
+      clearSevenDayPlanSnapshot();
+      return this.getWeekQueue();
+    }
+    const queue = removeQueuedWeek(weekId);
+    if (queue.weeks.length === 0) {
+      clearWeekPostingPlan();
+      clearSevenDayPlanSnapshot();
+    }
+    return this.getWeekQueue();
+  },
+
+  getWeekPostingPlan(weekId?: string): {
+    plan: WeekPostingPlan | null;
+    carousels: OpenCarouselItem[];
+    week: QueuedWeek | null;
+    queue: WeekQueue;
+  } {
+    const queue = loadWeekQueue();
+    const week = getQueuedWeek(queue, weekId);
+    if (!week) {
+      // Compat fallback for callers that only ever wrote the legacy key.
+      const plan = loadWeekPostingPlan();
+      if (!plan) return { plan: null, carousels: [], week: null, queue };
+      const byId = new Map(listQueuedCarousels().map((c) => [c.id, c]));
+      const carousels = plan.slots
+        .map((s) => byId.get(s.carouselId))
+        .filter((c): c is OpenCarouselItem => Boolean(c));
+      return { plan, carousels, week: null, queue };
+    }
+    const byId = new Map(listQueuedCarousels().map((c) => [c.id, c]));
+    const carousels = week.plan.slots
       .map((s) => byId.get(s.carouselId))
       .filter((c): c is OpenCarouselItem => Boolean(c));
-    return { plan, carousels };
+    return { plan: week.plan, carousels, week, queue };
   },
 
   /** Load the one central plan markdown (+ structured week plan when present). */
@@ -2233,6 +2827,8 @@ JSON:`;
   async queueWeekPlanToZernio(options?: {
     simulate?: boolean;
     onProgress?: (msg: string) => void;
+    /** Queue carousels for this week only (defaults to active/selected). */
+    weekId?: string;
   }): Promise<{
     ok: boolean;
     queued: number;
@@ -2241,7 +2837,7 @@ JSON:`;
     carousels: OpenCarouselItem[];
     message: string;
   }> {
-    const { plan, carousels } = this.getWeekPostingPlan();
+    const { plan, carousels } = this.getWeekPostingPlan(options?.weekId);
     if (!plan || carousels.length === 0) {
       throw new Error("No week plan carousels to queue. Build the week plan first.");
     }
@@ -2356,6 +2952,125 @@ JSON:`;
    * Open Carrusel PNG export → Zernio media presign/upload → POST /v1/posts.
    * Pass `{ simulate: true }` to skip the real API (works in real-data mode).
    */
+  /**
+   * Live draft + scheduled posts from Zernio (GET /v1/posts).
+   * In simulate mode, returns locally recorded simulated publishes.
+   */
+  async listZernioQueuedPosts(options?: {
+    status?: Array<"draft" | "scheduled" | string>;
+  }): Promise<{
+    ok: boolean;
+    posts: Array<{
+      id: string;
+      title: string;
+      content: string;
+      status: string;
+      scheduledFor?: string;
+      timezone?: string;
+      platforms: string[];
+      imageUrls: string[];
+      createdAt?: string;
+      updatedAt?: string;
+      source: "zernio" | "simulation";
+      /** Local Open Carrusel id when matched (sim or title match). */
+      carouselId?: string;
+    }>;
+    message: string;
+  }> {
+    if (!useLive()) {
+      const sims = listSimulatedPublishes();
+      return {
+        ok: true,
+        posts: sims.map((r) => ({
+          id: r.id,
+          title: r.name,
+          content: r.captionPreview || "",
+          status: "published",
+          scheduledFor: r.publishedAt,
+          platforms: [String(r.platform)],
+          imageUrls: [] as string[],
+          createdAt: r.publishedAt,
+          source: "simulation" as const,
+          carouselId: r.carouselId,
+        })),
+        message:
+          sims.length === 0
+            ? "No simulated publishes yet."
+            : `${sims.length} simulated publish${sims.length === 1 ? "" : "es"}.`,
+      };
+    }
+
+    try {
+      await this.syncConfig();
+    } catch {
+      /* still attempt list — key may already be on the server */
+    }
+
+    const statuses = options?.status?.length
+      ? options.status
+      : ["draft", "scheduled"];
+    const qs = new URLSearchParams({
+      status: statuses.join(","),
+      limit: "25",
+      sortBy: "scheduled-desc",
+    });
+    const accountId = loadSettings().zernioAccountId.trim();
+    if (accountId) qs.set("accountId", accountId);
+
+    try {
+      const raw = await liveFetch<{
+        ok?: boolean;
+        posts?: Array<{
+          id: string;
+          title: string;
+          content: string;
+          status: string;
+          scheduledFor?: string;
+          timezone?: string;
+          platforms: string[];
+          imageUrls?: string[];
+          createdAt?: string;
+          updatedAt?: string;
+        }>;
+        message?: string;
+      }>(`/api/content-creator-ai/zernio/posts?${qs.toString()}`);
+
+      const local = listQueuedCarousels();
+      return {
+        ok: Boolean(raw.ok),
+        posts: (raw.posts ?? []).map((p) => {
+          const imageUrls = p.imageUrls ?? [];
+          const titleNorm = (p.title || "").trim().toLowerCase();
+          const match =
+            imageUrls.length === 0 && titleNorm
+              ? local.find(
+                  (c) =>
+                    c.name.trim().toLowerCase() === titleNorm ||
+                    c.name.trim().toLowerCase().includes(titleNorm) ||
+                    titleNorm.includes(c.name.trim().toLowerCase()),
+                )
+              : undefined;
+          return {
+            ...p,
+            platforms: p.platforms ?? [],
+            imageUrls,
+            source: "zernio" as const,
+            carouselId: match?.id,
+          };
+        }),
+        message: raw.message ?? "Zernio posts loaded.",
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/No route for GET .*zernio\/posts/i.test(msg)) {
+        throw new Error(
+          "API is missing /zernio/posts — restart with npm run api:dev (or npm run dev:stack).",
+        );
+      }
+      throw e;
+    }
+  },
+
   async publishCarouselToZernio(
     carousel: OpenCarouselItem,
     options?: { simulate?: boolean },
@@ -2602,21 +3317,31 @@ Markdown:`;
   },
 
   /**
-   * Insights → RAG (`insights-latest`) → 7-day carousel plan.
-   * Used from Insights and Plan empty/generate CTAs.
+   * Synthesize a readable insights analysis (and save to RAG + local cache).
    */
-  async analyzeInsightsAndPlanWeek(options?: {
+  async analyzeInsights(options?: {
     onProgress?: (msg: string) => void;
-  }): Promise<{
-    insightsMarkdown: string;
-    plan: WeekPostingPlan;
-    carousels: OpenCarouselItem[];
-    hypotheses: HypothesisCard[];
-    roadmap: RoadmapSummary;
-    markdown: string;
-  }> {
+  }): Promise<{ markdown: string; updatedAt: string }> {
     options?.onProgress?.("Loading analytics…");
     const analytics = await this.getAnalytics();
+    const sufficiency = assessAnalyticsSufficiency(analytics);
+
+    if (!sufficiency.enough) {
+      options?.onProgress?.("Not enough analytics data…");
+      const markdown = insufficientAnalyticsMarkdown("analysis", analytics);
+      try {
+        await this.saveToRag({
+          entityId: INSIGHTS_LATEST_ENTITY_ID,
+          entityType: "experiment",
+          markdown,
+          append: false,
+        });
+      } catch {
+        /* local cache still works */
+      }
+      const saved = saveInsightsAnalysis(markdown);
+      return { markdown: saved.markdown, updatedAt: saved.updatedAt };
+    }
 
     options?.onProgress?.("Gathering RAG / KB context…");
     const { passages } = await this.gatherRagMarkdownContext(
@@ -2624,33 +3349,285 @@ Markdown:`;
       { limit: 8 },
     );
 
-    options?.onProgress?.("Synthesizing insights with LLM…");
-    const insightsMarkdown = await this.generateInsightAnalysis(
-      analytics,
-      passages,
-    );
+    options?.onProgress?.("Writing analysis…");
+    const markdown = await this.generateInsightAnalysis(analytics, passages);
 
-    options?.onProgress?.("Saving insights to RAG (insights-latest)…");
+    options?.onProgress?.("Saving analysis…");
     try {
       await this.saveToRag({
         entityId: INSIGHTS_LATEST_ENTITY_ID,
         entityType: "experiment",
-        markdown: insightsMarkdown,
+        markdown,
         append: false,
       });
     } catch {
-      // Plan still proceeds from injected markdown if KB write fails.
+      // UI still shows local analysis if KB write fails.
     }
 
-    if (!useLive()) {
-      options?.onProgress?.("Loading demo plan from insights…");
-      await this.kickstartPlan("insights-driven week");
-      const built = await this.generateWeekPostingPlan({
-        startFrom: "today",
+    const saved = saveInsightsAnalysis(markdown);
+    return { markdown: saved.markdown, updatedAt: saved.updatedAt };
+  },
+
+  /**
+   * Mine the analysis (+ analytics) for copy/ideas and angles that actually perform.
+   */
+  async extractPerformingInsights(options?: {
+    onProgress?: (msg: string) => void;
+    /** Prefer this analysis text; otherwise load cached / regenerate. */
+    analysisMarkdown?: string;
+  }): Promise<{ markdown: string; updatedAt: string }> {
+    options?.onProgress?.("Loading analytics…");
+    const analytics = await this.getAnalytics();
+    const sufficiency = assessAnalyticsSufficiency(analytics);
+
+    if (!sufficiency.enough) {
+      options?.onProgress?.("Not enough analytics data…");
+      const markdown = insufficientAnalyticsMarkdown("extract", analytics);
+      try {
+        await this.saveToRag({
+          entityId: INSIGHTS_EXTRACT_ENTITY_ID,
+          entityType: "experiment",
+          markdown,
+          append: false,
+        });
+      } catch {
+        /* local cache still works */
+      }
+      const saved = saveInsightsExtract(markdown);
+      return { markdown: saved.markdown, updatedAt: saved.updatedAt };
+    }
+
+    let analysis =
+      options?.analysisMarkdown?.trim() ||
+      loadInsightsAnalysis()?.markdown?.trim() ||
+      "";
+
+    // Skip regenerating a full analysis if the cached one is just the
+    // "not enough data" stub from an earlier thin run.
+    if (
+      analysis &&
+      /Not enough analytics data|Not enough data to name winners/i.test(analysis)
+    ) {
+      analysis = "";
+    }
+
+    if (!analysis) {
+      options?.onProgress?.("No analysis yet — writing one first…");
+      const generated = await this.analyzeInsights({
         onProgress: options?.onProgress,
       });
-      const roadmap: RoadmapSummary = {
-        title: "Next 7 days",
+      analysis = generated.markdown;
+      if (
+        /Not enough analytics data|Not enough data to name winners/i.test(
+          analysis,
+        )
+      ) {
+        const markdown = insufficientAnalyticsMarkdown("extract", analytics);
+        const saved = saveInsightsExtract(markdown);
+        return { markdown: saved.markdown, updatedAt: saved.updatedAt };
+      }
+    }
+
+    options?.onProgress?.("Extracting winning copy & angles…");
+    const llm = loadSettings().llm;
+    const analyticsBlock = formatAnalyticsForPrompt(analytics);
+    const prompt = `You are Liquid Copy's performance miner. From the insights analysis and analytics below, extract ONLY what is already working.
+
+Write markdown with these sections exactly:
+# Performing playbook
+## Copy & ideas that work
+## Angles that work
+
+Rules:
+- Copy & ideas = concrete hooks / lines / content ideas that performed (quote or closely paraphrase real hooks from the data)
+- Angles = creative/positioning angles that performed (not generic advice)
+- Prefer winners and high engagement; skip underperformers
+- 4–7 bullets per section max; each bullet one line; include a short why when clear
+- If the data is still too thin to name real winners, say so clearly instead of inventing any
+- No fluff, no next-week planning, no code fences
+
+Insights analysis:
+${analysis.slice(0, 3500)}
+
+Analytics:
+${analyticsBlock}
+
+Markdown:`;
+
+    let markdown = "";
+    try {
+      const raw = await completeWithSettings(llm, prompt);
+      markdown = raw
+        .replace(/^```(?:markdown|md)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+    } catch {
+      markdown = "";
+    }
+    if (markdown.length < 60) {
+      markdown = fallbackPerformersExtract(analytics);
+    }
+
+    options?.onProgress?.("Saving performers extract…");
+    try {
+      await this.saveToRag({
+        entityId: INSIGHTS_EXTRACT_ENTITY_ID,
+        entityType: "experiment",
+        markdown,
+        append: false,
+      });
+    } catch {
+      // Local cache still works if KB write fails.
+    }
+
+    const saved = saveInsightsExtract(markdown);
+    return { markdown: saved.markdown, updatedAt: saved.updatedAt };
+  },
+
+  /**
+   * Build a week plan from existing Insights markdown (`insights-performers`
+   * + `insights-latest`). Does not regenerate analysis unless none exists.
+   */
+  async analyzeInsightsAndPlanWeek(options?: {
+    onProgress?: (msg: string) => void;
+    mode?: "append" | "replaceSelected";
+    weekId?: string;
+  }): Promise<{
+    insightsMarkdown: string;
+    plan: WeekPostingPlan;
+    carousels: OpenCarouselItem[];
+    hypotheses: HypothesisCard[];
+    roadmap: RoadmapSummary;
+    markdown: string;
+    queue: WeekQueue;
+    week: QueuedWeek;
+  }> {
+    const mode = options?.mode ?? "append";
+    const queueBefore = loadWeekQueue();
+
+    let weekStartDate: Date;
+    if (mode === "replaceSelected") {
+      const existing = options?.weekId
+        ? getQueuedWeek(queueBefore, options.weekId)
+        : getQueuedWeek(queueBefore);
+      weekStartDate = existing
+        ? (() => {
+            const d = new Date(existing.weekStart);
+            d.setHours(10, 0, 0, 0);
+            return d;
+          })()
+        : startOfNextContentWeek();
+    } else if (queueBefore.weeks.length === 0) {
+      weekStartDate = startOfNextContentWeek();
+    } else {
+      // Guarantee a unique week id — never silently overwrite week 1.
+      weekStartDate = ensureUniqueWeekStart(
+        queueBefore,
+        nextWeekStartFromQueue(queueBefore),
+      );
+    }
+
+    const weekId =
+      mode === "replaceSelected" && options?.weekId
+        ? options.weekId
+        : weekIdFromStart(weekStartDate.toISOString());
+    const planEntityId = weekPlanEntityId(weekId);
+
+    options?.onProgress?.("Loading Insights markdown…");
+    let ctx = await this.loadInsightsPlanContext();
+    if (!ctx.combined) {
+      options?.onProgress?.("No Insights docs yet — analyzing first…");
+      await this.analyzeInsights({ onProgress: options?.onProgress });
+      try {
+        await this.extractPerformingInsights({
+          onProgress: options?.onProgress,
+        });
+      } catch {
+        // Analysis alone is enough to plan.
+      }
+      ctx = await this.loadInsightsPlanContext();
+    }
+
+    const insightsMarkdown =
+      ctx.combined ||
+      "(No Insights markdown — plan from company KB / RAG only.)";
+
+    options?.onProgress?.(
+      ctx.source === "none"
+        ? `Building ${weekId}…`
+        : `Building ${weekId} from Insights (${ctx.source})…`,
+    );
+
+    // Pass every queued week's hooks so Next week / Rebuild can't echo them.
+    const priorWeeksExclusion = formatPriorWeeksForPrompt(queueBefore);
+    const weekIndex =
+      mode === "append"
+        ? queueBefore.weeks.length + 1
+        : Math.max(
+            1,
+            queueBefore.weeks.findIndex(
+              (w) =>
+                w.id === (options?.weekId ?? getQueuedWeek(queueBefore)?.id),
+            ) + 1,
+          );
+
+    let plan: WeekPostingPlan;
+    let carousels: OpenCarouselItem[];
+    let hypotheses: HypothesisCard[];
+    let roadmap: RoadmapSummary;
+    let markdown: string;
+
+    try {
+      const built = await this.generateSevenDayPlan({
+        onProgress: options?.onProgress,
+        insightsMarkdown,
+        weekStartDate,
+        priorWeeksExclusion: priorWeeksExclusion || undefined,
+        weekIndex,
+        weekId,
+      });
+      plan = built.plan;
+      carousels = built.carousels;
+      hypotheses = built.hypotheses;
+      roadmap = built.roadmap;
+      markdown = built.markdown;
+    } catch (primaryError) {
+      if (useLive()) throw primaryError;
+      // Simulation fallback — never reuse prior snapshot hooks as-is.
+      options?.onProgress?.("Falling back to diversified demo week…");
+      const priorHooks = priorWeeksExclusion
+        .split("\n")
+        .map((l) =>
+          l
+            .replace(/^- \[[^\]]+\]\s*/, "")
+            .replace(/^[^—]*—\s*/, "")
+            .trim(),
+        )
+        .filter(Boolean);
+      const stamp = Date.now().toString(36);
+      const reminted = Array.from({ length: 7 }, (_, i) => {
+        const pivot = WEEK_PIVOTS[i % WEEK_PIVOTS.length]!;
+        const hook = `W${weekIndex} · ${pivot}: demo test ${i + 1} for ${weekId}`;
+        return {
+          id: `hyp-${weekId}-${stamp}-${i}`,
+          title: `W${weekIndex}: ${pivot}`,
+          hook,
+          angle: `Demo fallback — distinct from prior weeks (${priorHooks.length} banned hooks).`,
+          platform: PLAN_PLATFORMS[i % PLAN_PLATFORMS.length]!,
+          status: "queued" as const,
+        };
+      });
+      const built = await this.generateWeekPostingPlan({
+        hypotheses: reminted,
+        weekStartDate,
+        onProgress: options?.onProgress,
+        persistLegacy: false,
+        weekId,
+        weekIndex,
+        forceNewCarousels: true,
+      });
+      roadmap = {
+        title: `Content plan · ${weekId}`,
         summary:
           built.plan.summary ||
           "Insights-driven demo plan — one carousel experiment per day.",
@@ -2660,23 +3637,40 @@ Markdown:`;
           objective: [h.hook, h.angle].filter(Boolean).join(" — "),
         })),
       };
-      saveSevenDayPlanSnapshot({
-        roadmap,
-        hypotheses: built.hypotheses,
-      });
-      return {
-        insightsMarkdown,
-        ...built,
-        roadmap,
-      };
+      plan = built.plan;
+      carousels = built.carousels;
+      hypotheses = built.hypotheses;
+      markdown = built.markdown;
     }
 
-    options?.onProgress?.("Building 7-day carousel plan from insights…");
-    const built = await this.generateSevenDayPlan({
-      onProgress: options?.onProgress,
-      insightsMarkdown,
+    const week = buildQueuedWeek({
+      plan,
+      hypotheses,
+      roadmap,
+      insightsSnippet: insightsMarkdown.slice(0, 240),
+      planEntityId,
     });
-    return { insightsMarkdown, ...built };
+    const queue = upsertQueuedWeek(
+      week,
+      mode === "replaceSelected" ? "replaceSelected" : "append",
+      mode === "replaceSelected" ? options?.weekId ?? week.id : undefined,
+    );
+    const stored = getQueuedWeek(queue, week.id) ?? week;
+
+    if (roadmap && hypotheses.length > 0) {
+      saveSevenDayPlanSnapshot({ roadmap, hypotheses });
+    }
+
+    return {
+      insightsMarkdown,
+      plan,
+      carousels,
+      hypotheses,
+      roadmap,
+      markdown,
+      queue,
+      week: stored,
+    };
   },
 
   subscribe(listener: () => void): () => void {

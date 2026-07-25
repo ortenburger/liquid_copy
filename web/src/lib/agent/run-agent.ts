@@ -1,7 +1,7 @@
 import { ToolLoopAgent, generateText, stepCountIs } from "ai";
 import type { LLMSettings } from "../settings";
 import type { RAGPassage } from "../types";
-import { createModelFromSettings } from "./model";
+import { createModelFromSettings, ollamaProviderOptions } from "./model";
 import {
   createLiquidCopyTools,
   type LiquidCopyToolDeps,
@@ -218,6 +218,7 @@ async function synthesizeAnswer(input: {
   const result = await generateText({
     model,
     temperature: Math.min(input.llm.temperature, 0.4),
+    providerOptions: ollamaProviderOptions(input.llm),
     prompt: `You are the Liquid Copy agent. Answer the user's latest question using the conversation, retrieved knowledge, and tool results below.
 
 RULES:
@@ -284,6 +285,7 @@ export async function runLiquidCopyAgent(
     stopWhen: stepCountIs(8),
     instructions: systemInstructions(context),
     tools,
+    providerOptions: ollamaProviderOptions(input.llm),
   });
 
   let result = await agent.generate({ messages });

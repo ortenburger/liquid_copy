@@ -30,6 +30,7 @@ import { POST as workflowResetPost } from "@/app/api/content-creator-ai/workflow
 import { POST as checkpointPost } from "@/app/api/content-creator-ai/checkpoints/[stage]/[action]/route.js";
 import { POST as searchPost } from "@/app/api/content-creator-ai/search/route.js";
 import { POST as zernioPublishPost } from "@/app/api/content-creator-ai/zernio/publish/route.js";
+import { GET as zernioPostsGet } from "@/app/api/content-creator-ai/zernio/posts/route.js";
 import { GET as traceabilityGet } from "@/app/api/content-creator-ai/traceability/[variantId]/route.js";
 import { applyRequestSecrets } from "@/lib/content-creator-ai/api/runtime.js";
 import {
@@ -118,6 +119,7 @@ const routes: Route[] = [
   exact("POST", "/api/content-creator-ai/workflow/reset", workflowResetPost),
   exact("POST", "/api/content-creator-ai/search", searchPost),
   exact("POST", "/api/content-creator-ai/zernio/publish", zernioPublishPost),
+  exact("GET", "/api/content-creator-ai/zernio/posts", zernioPostsGet),
   pattern(
     "POST",
     "/api/content-creator-ai/checkpoints/[stage]/[action]",

@@ -8,6 +8,18 @@ function trimBase(url: string): string {
   return url.replace(/\/$/, "");
 }
 
+/** Keep local Ollama snappy — huge default context (~32k) makes loads slow. */
+export const OLLAMA_NUM_CTX = 4096;
+
+export function ollamaProviderOptions(settings: LLMSettings) {
+  if (settings.provider !== "ollama") return undefined;
+  return {
+    ollama: {
+      options: { num_ctx: OLLAMA_NUM_CTX },
+    },
+  };
+}
+
 /** Build an AI SDK language model from Liquid Copy Settings. */
 export function createModelFromSettings(settings: LLMSettings): LanguageModel {
   const baseUrl = trimBase(settings.baseUrl);

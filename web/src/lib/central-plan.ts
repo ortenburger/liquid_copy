@@ -5,8 +5,14 @@ import type {
 } from "./types";
 import type { OpenCarouselItem } from "./open-carousel";
 
-/** Single KB markdown entity that holds the central testing / week plan. */
+/** Index / latest-pointer KB entity (not the per-week source of truth). */
 export const CENTRAL_PLAN_ENTITY_ID = "testing-plan";
+
+/** One markdown document per queued week — never overwrite week N with week N+1. */
+export function weekPlanEntityId(weekId: string): string {
+  const safe = weekId.trim().replace(/[^a-zA-Z0-9_-]+/g, "-");
+  return `testing-plan-${safe || "week"}`;
+}
 
 function formatWhen(iso: string): string {
   try {
@@ -23,12 +29,15 @@ function formatWhen(iso: string): string {
 }
 
 /**
- * Render the one central plan document (markdown) from structured plan data.
+ * Render a week plan document (markdown) from structured plan data.
+ * Each week should be saved under its own entity id (`testing-plan-{weekId}`).
  */
 export function formatCentralPlanMarkdown(input: {
   plan: WeekPostingPlan;
   hypotheses: HypothesisCard[];
   carousels: OpenCarouselItem[];
+  weekId?: string;
+  weekLabel?: string;
 }): string {
   const { plan, hypotheses, carousels } = input;
   const carouselById = new Map(carousels.map((c) => [c.id, c]));
@@ -63,11 +72,17 @@ export function formatCentralPlanMarkdown(input: {
     .join("\n\n");
 
   const machine: WeekPostingPlan = plan;
+  const title = input.weekLabel
+    ? `Testing plan · ${input.weekLabel}`
+    : input.weekId
+      ? `Testing plan · ${input.weekId}`
+      : "Testing plan";
 
-  return `# Testing plan
+  return `# ${title}
 
-> Central plan document. Updated when you build the week plan.
+> Per-week plan document${input.weekId ? ` (\`${input.weekId}\`)` : ""}. Do not reuse hooks from other week docs.
 
+- **Week id:** ${input.weekId ?? "—"}
 - **Week start:** ${formatWhen(plan.weekStart)}
 - **Updated:** ${formatWhen(plan.createdAt)}
 - **Slots:** ${plan.slots.length}
@@ -89,6 +104,24 @@ ${weekLines || "_No week slots yet. Build the week plan._"}
 \`\`\`json
 ${JSON.stringify(machine, null, 2)}
 \`\`\`
+`;
+}
+
+/** Short index pointing at each per-week plan entity. */
+export function formatWeekPlanIndexMarkdown(
+  weeks: Array<{ id: string; label: string; weekStart: string; planEntityId: string }>,
+): string {
+  const lines = weeks.map(
+    (w) =>
+      `- **${w.label}** (\`${w.id}\`) → \`${w.planEntityId}\` · starts ${formatWhen(w.weekStart)}`,
+  );
+  return `# Testing plan index
+
+> Pointers to per-week plan markdown. Each week has its own document — never merge weeks.
+
+## Weeks
+
+${lines.length ? lines.join("\n") : "_No weeks queued._"}
 `;
 }
 

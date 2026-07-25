@@ -44,7 +44,7 @@ describe("AnthropicLLMClient", () => {
 
     const client = new AnthropicLLMClient({
       apiKey: "sk-ant-test",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       fetchImpl,
     });
     await expect(client.complete("ping", { system: "be brief" })).resolves.toBe(
@@ -55,7 +55,7 @@ describe("AnthropicLLMClient", () => {
     expect(calls[0].headers.get("x-api-key")).toBe("sk-ant-test");
     expect(calls[0].headers.get("anthropic-version")).toBe("2023-06-01");
     expect(calls[0].body).toMatchObject({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       system: "be brief",
       messages: [{ role: "user", content: "ping" }],
     });
@@ -70,7 +70,7 @@ describe("buildLLMClientFromConfig", () => {
       baseUrl: "http://127.0.0.1:9",
       model: "llama3.1",
       fallbackApiKey: "sk-ant-fallback",
-      fallbackModel: "claude-sonnet-4-20250514",
+      fallbackModel: "claude-sonnet-4-6",
     });
     // Unreachable Ollama should fail fast and leave room for Claude; without a
     // network Claude call we only assert the wrapper type via behavior:

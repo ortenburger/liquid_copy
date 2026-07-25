@@ -66,7 +66,7 @@ export const PROVIDER_PRESETS: Record<
   anthropic: {
     label: "Anthropic (Claude)",
     defaultBaseUrl: "https://api.anthropic.com",
-    defaultModel: "claude-sonnet-4-20250514",
+    defaultModel: "claude-sonnet-4-6",
     needsKey: true,
   },
   openai_compatible: {
@@ -143,24 +143,40 @@ export function normalizeZernioApiBaseUrl(raw: string): string {
   return trimmed;
 }
 
+/** Retired Anthropic snapshot IDs → current replacements. */
+const RETIRED_ANTHROPIC_MODELS: Record<string, string> = {
+  "claude-sonnet-4-20250514": "claude-sonnet-4-6",
+  "claude-opus-4-20250514": "claude-opus-4-6",
+  "claude-sonnet-4": "claude-sonnet-4-6",
+  "claude-3-5-sonnet-latest": "claude-sonnet-4-6",
+  "claude-3-5-sonnet-20241022": "claude-sonnet-4-6",
+};
+
+function migrateAnthropicModelId(model: string): string {
+  const trimmed = model.trim();
+  return RETIRED_ANTHROPIC_MODELS[trimmed] ?? trimmed;
+}
+
 function parseLLM(raw: Partial<LLMSettings> | undefined): LLMSettings {
   const provider = (raw?.provider ?? "ollama") as LLMProvider;
   const base = defaultLLMSettings(
     provider in PROVIDER_PRESETS ? provider : "ollama",
+  );
+  const model = migrateAnthropicModelId(String(raw?.model ?? base.model));
+  const fallbackModel = migrateAnthropicModelId(
+    String(raw?.fallbackModel ?? PROVIDER_PRESETS.anthropic.defaultModel),
   );
   return {
     ...base,
     ...raw,
     provider: base.provider,
     baseUrl: String(raw?.baseUrl ?? base.baseUrl).replace(/\/$/, ""),
-    model: String(raw?.model ?? base.model),
+    model,
     apiKey: String(raw?.apiKey ?? ""),
     temperature:
       typeof raw?.temperature === "number" ? raw.temperature : base.temperature,
     fallbackApiKey: String(raw?.fallbackApiKey ?? ""),
-    fallbackModel: String(
-      raw?.fallbackModel ?? PROVIDER_PRESETS.anthropic.defaultModel,
-    ),
+    fallbackModel,
   };
 }
 
