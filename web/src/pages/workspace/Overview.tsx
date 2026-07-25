@@ -3,8 +3,8 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
-import { useAsyncAction, useWorkflowStatus } from "../../lib/hooks";
-import { isDemoWorkspace, loadSettings } from "../../lib/settings";
+import { useAsyncAction, useDataMode, useWorkflowStatus } from "../../lib/hooks";
+import { loadSettings } from "../../lib/settings";
 import type { StageStatus } from "../../lib/types";
 import "./workspace.css";
 
@@ -23,11 +23,11 @@ function labelStatus(status: StageStatus) {
 export function OverviewPage() {
   const status = useWorkflowStatus();
   const { busy, error, run } = useAsyncAction();
+  const { simulation } = useDataMode();
   const processing = status.stages.some(
     (s) => s.status === "in_progress" || s.status === "awaiting_approval",
   );
-  const demo = isDemoWorkspace();
-  const llm = loadSettings();
+  const llm = loadSettings().llm;
 
   return (
     <div className="page stagger-in">
@@ -56,17 +56,21 @@ export function OverviewPage() {
         </div>
       </header>
 
-      {demo ? (
+      {simulation ? (
         <p className="info-banner">
-          <Badge tone="processing">Demo data</Badge>{" "}
-          Workflow, experiments, and knowledge here are simulated in the browser.
-          Configure a real model under{" "}
-          <Link to="/app/settings">Settings</Link> (currently{" "}
-          <strong>{llm.provider}</strong> · {llm.model}). Agent pipelines run for
-          real only when a live API is available via{" "}
-          <code>VITE_API_BASE_URL</code>.
+          <Badge tone="processing">Simulation</Badge>{" "}
+          Workflow fixtures are running in-browser. Flip{" "}
+          <Link to="/app/settings">Settings → Use real data</Link> when your API
+          is up. LLM preset: <strong>{llm.provider}</strong> · {llm.model}.
         </p>
-      ) : null}
+      ) : (
+        <p className="info-banner">
+          <Badge tone="active">Real data</Badge>{" "}
+          Workspace calls the Liquid Copy API. Configure Firecrawl and models under{" "}
+          <Link to="/app/settings">Settings</Link>. Open the carousel studio at{" "}
+          <Link to="/app/carousels">Carousels</Link>.
+        </p>
+      )}
 
       {error ? <p className="error-banner">{error}</p> : null}
 

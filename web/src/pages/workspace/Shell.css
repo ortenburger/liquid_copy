@@ -78,6 +78,18 @@
   padding-block: var(--space-lg);
 }
 
+.shell-main--embed {
+  max-width: none;
+  width: 100%;
+  padding-inline: var(--margin-mobile, 16px);
+}
+
+@media (min-width: 1024px) {
+  .shell-main--embed {
+    padding-inline: var(--space-lg);
+  }
+}
+
 @media (min-width: 1024px) {
   .shell-menu-btn {
     display: none;

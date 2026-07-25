@@ -12,6 +12,6 @@ npm run dev
 Open [http://localhost:5173](http://localhost:5173).
 
 - `/` — brand landing
-- `/app` — operator workspace (overview, checkpoints, experiments, knowledge, platforms, settings)
+- `/app` — operator workspace (overview, checkpoints, experiments, knowledge, platforms, carousels, settings)
 
-Uses an in-memory demo store by default for workflow UI. Configure Ollama / OpenAI / Claude under **Settings** (`/app/settings`); keys stay in `localStorage`. Set `VITE_API_BASE_URL` to point at a live Next server serving `/api/content-creator-ai/*` when you want the UI to drive real agents.
+**Settings** (`/app/settings`): simulation ↔ real data toggle, Firecrawl API key, LLM providers (Ollama / OpenAI / Claude), Open Carrusel URL. The studio is embedded at **`/app/carousels`**. Keys stay in `localStorage`.

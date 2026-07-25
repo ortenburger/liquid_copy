@@ -1,15 +1,30 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { api } from "../lib/api";
-import { demoStore } from "../lib/demo-store";
-import type { WorkflowStatus } from "../lib/types";
+import { api } from "./api";
+import { demoStore } from "./demo-store";
+import { isDemoWorkspace, subscribeSettings } from "./settings";
+import type { WorkflowStatus } from "./types";
 
 function getSnapshot(): WorkflowStatus {
   return demoStore.status();
 }
 
+function getDemoFlag(): boolean {
+  return isDemoWorkspace();
+}
+
+/** Re-render when Settings data-mode toggles. */
+export function useDataMode(): { simulation: boolean } {
+  const simulation = useSyncExternalStore(
+    subscribeSettings,
+    getDemoFlag,
+    getDemoFlag,
+  );
+  return { simulation };
+}
+
 /** Live workflow status from the demo store (or one-shot fetch when using live API). */
 export function useWorkflowStatus(): WorkflowStatus {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const { simulation } = useDataMode();
   const demoStatus = useSyncExternalStore(
     demoStore.subscribe.bind(demoStore),
     getSnapshot,
@@ -18,11 +33,14 @@ export function useWorkflowStatus(): WorkflowStatus {
   const [live, setLive] = useState<WorkflowStatus | null>(null);
 
   useEffect(() => {
-    if (!baseUrl) return;
-    void api.getWorkflowStatus().then(setLive).catch(() => undefined);
-  }, [baseUrl]);
+    if (simulation) {
+      setLive(null);
+      return;
+    }
+    void api.getWorkflowStatus().then(setLive).catch(() => setLive(null));
+  }, [simulation]);
 
-  return baseUrl && live ? live : demoStatus;
+  return !simulation && live ? live : demoStatus;
 }
 
 export function useAsyncAction() {

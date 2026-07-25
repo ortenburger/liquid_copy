@@ -102,7 +102,21 @@
   color: var(--on-surface-variant);
 }
 
-.settings-panel code {
+.settings-note {
+  margin: 0;
+  color: var(--on-surface-variant);
+  line-height: 1.5;
+}
+
+.settings-note.is-warn {
+  color: var(--status-failed);
+}
+
+.settings-note code {
   font: var(--text-label-mono);
   letter-spacing: 0.02em;
+}
+
+.carousel-preview-grid {
+  margin-top: var(--space-md);
 }

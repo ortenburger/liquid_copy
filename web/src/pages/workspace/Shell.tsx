@@ -1,4 +1,4 @@
-import { NavLink, Outlet, Link } from "react-router-dom";
+import { NavLink, Outlet, Link, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import logoNav from "../../assets/logo-nav.png";
@@ -10,11 +10,14 @@ const NAV = [
   { to: "/app/experiments", label: "Experiments" },
   { to: "/app/knowledge", label: "Knowledge" },
   { to: "/app/platforms", label: "Platforms" },
+  { to: "/app/carousels", label: "Carousels" },
   { to: "/app/settings", label: "Settings" },
 ] as const;
 
 export function WorkspaceShell() {
   const [open, setOpen] = useState(false);
+  const { pathname } = useLocation();
+  const embed = pathname.startsWith("/app/carousels");
 
   return (
     <div className="shell">
@@ -52,7 +55,11 @@ export function WorkspaceShell() {
           </Link>
         </div>
       </header>
-      <main className="shell-main container">
+      <main
+        className={
+          embed ? "shell-main shell-main--embed" : "shell-main container"
+        }
+      >
         <Outlet />
       </main>
     </div>
