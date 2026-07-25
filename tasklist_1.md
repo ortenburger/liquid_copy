@@ -11,7 +11,7 @@ Agent 2 and Agent 3 start in parallel. They import types and call KB/RAG/Event B
 
 ## Tasks
 
-- [ ] 1. Project foundation — types, interfaces, and directory structure
+- [x] 1. Project foundation — types, interfaces, and directory structure
   - Create `src/lib/content-creator-ai/` directory tree: `agents/`, `kb/`, `rag/`, `orchestration/`, `publishing/`, `integrations/`, `api/`, `types/`
   - Define all core TypeScript interfaces in `src/lib/content-creator-ai/types/index.ts`:
     - `CompanyIdentity`, `KBVersion`, `MarketingGoal`, `SuccessMetric`
@@ -32,49 +32,49 @@ Agent 2 and Agent 3 start in parallel. They import types and call KB/RAG/Event B
     `kb-merge.pbt.test.ts`, `rag-retrieval.pbt.test.ts`, `goal-validation.pbt.test.ts`, `persona.pbt.test.ts`, `platform-validation.pbt.test.ts`, `roadmap.pbt.test.ts`, `hypothesis.pbt.test.ts`, `post-variant.pbt.test.ts`, `analytics.pbt.test.ts`, `learning-agent.pbt.test.ts`, `workflow-engine.pbt.test.ts`, `traceability.pbt.test.ts`
   - _Requirements: All (foundational scaffolding)_
 
-- [ ] 2. Knowledge Base (KB) storage layer
-  - [ ] 2.1 Implement KB file storage in `src/lib/content-creator-ai/kb/storage.ts`
+- [x] 2. Knowledge Base (KB) storage layer
+  - [x] 2.1 Implement KB file storage in `src/lib/content-creator-ai/kb/storage.ts`
     - Write `readKBEntity`, `writeKBEntity`, `listVersions`, `getVersionChain` functions
     - Implement write-once snapshot files `{entity_id}_v{n}.md` and `{entity_id}_current.md` symlink/reference pattern
     - Implement monotonically-incrementing version counter stored alongside each experiment record
     - Reject any attempt to modify or delete an existing snapshot (throw on overwrite)
     - _Requirements: 2.1, 2.2, 11.7_
 
-  - [ ] 2.2 Implement KB Markdown serialiser/parser in `src/lib/content-creator-ai/kb/markdown.ts`
+  - [x] 2.2 Implement KB Markdown serialiser/parser in `src/lib/content-creator-ai/kb/markdown.ts`
     - Serialise `CompanyIdentity`, `Product`, `AudiencePersona`, `Experiment` entities to Markdown with required top-level sections: `Company_Identity`, `Products`, `Audiences`, `Experiments`
     - Parse Markdown back to typed objects; validate all four sections are present and non-empty for populated entities
     - _Requirements: 2.1_
 
-  - [ ] 2.3 Implement KB merge logic in `src/lib/content-creator-ai/kb/merge.ts`
+  - [x] 2.3 Implement KB merge logic in `src/lib/content-creator-ai/kb/merge.ts`
     - Implement deep merge where `userProvidedValues` keys always overwrite scraped/existing values for conflicting fields
     - Preserve all non-conflicting existing KB fields unchanged
     - _Requirements: 1.2, 1.3_
 
-  - [ ]* 2.4 Write property tests for KB storage and Markdown serialisation — `tests/pbt/kb-merge.pbt.test.ts`
+  - [x]* 2.4 Write property tests for KB storage and Markdown serialisation — `tests/pbt/kb-merge.pbt.test.ts`
     - **Property 1: User-provided values always take precedence in KB merge** — Validates: Requirements 1.2, 1.3
     - **Property 3: KB edit always creates a version record with prior values** — Validates: Requirements 1.6, 2.2
     - **Property 4: Rejection never mutates the KB** — Validates: Requirements 1.7, 7.7
     - **Property 5: KB Markdown serialisation preserves required sections** — Validates: Requirement 2.1
     - **Property 6: Version history is append-only and monotonically ordered** — Validates: Requirements 2.2, 11.7
 
-- [ ] 3. RAG Layer
-  - [ ] 3.1 Implement RAG vector store adapter in `src/lib/content-creator-ai/rag/vectorstore.ts`
+- [x] 3. RAG Layer
+  - [x] 3.1 Implement RAG vector store adapter in `src/lib/content-creator-ai/rag/vectorstore.ts`
     - Wrap local embedding model (`nomic-embed-text` via Ollama) and vector store (ChromaDB or `hnswlib`)
     - Implement `indexDocuments(docs: KBDocument[]): Promise<void>` and `semanticSearch({ query, scope, k }): Promise<RAGPassage[]>`
     - Enforce retrieval scope filtering: `product_context`, `company_memory`, `experiment_history`, `audience_learning`
     - Return `[]` (not an error) when unavailable or zero results found
     - _Requirements: 2.3, 14.1, 14.2, 14.3_
 
-  - [ ] 3.2 Implement RAG re-index trigger in `src/lib/content-creator-ai/rag/reindex.ts`
+  - [x] 3.2 Implement RAG re-index trigger in `src/lib/content-creator-ai/rag/reindex.ts`
     - Subscribe to `kb.updated` events from the Event Bus; trigger re-indexing of affected documents within 60 seconds
     - _Requirements: 14.4_
 
-  - [ ]* 3.3 Write property tests for RAG retrieval — `tests/pbt/rag-retrieval.pbt.test.ts`
+  - [x]* 3.3 Write property tests for RAG retrieval — `tests/pbt/rag-retrieval.pbt.test.ts`
     - **Property 7: RAG returns at most k results, all from indexed content** — Validates: Requirement 2.3
     - **Property 29: RAG passage count is always min(available, 5)** — Validates: Requirements 14.2, 14.6
 
-- [ ] 4. Event Bus
-  - [ ] 4.1 Implement the Event Bus in `src/lib/content-creator-ai/orchestration/event-bus.ts`
+- [x] 4. Event Bus
+  - [x] 4.1 Implement the Event Bus in `src/lib/content-creator-ai/orchestration/event-bus.ts`
     - Typed event definitions with payloads:
       - `firecrawl.error` — `{ url: string; reason: string }`
       - `kb.updated` — `{ entityId: string; entityType: KBEntityType; version: number }`
@@ -88,7 +88,7 @@ Agent 2 and Agent 3 start in parallel. They import types and call KB/RAG/Event B
     - Export a singleton `eventBus` instance for use across all agents
     - _Requirements: 11.6, 12.1–12.10_
 
-- [ ] 5. Checkpoint — KB, RAG, and Event Bus compile and tests pass
+- [x] 5. Checkpoint — KB, RAG, and Event Bus compile and tests pass
   - Run `vitest --run tests/pbt/kb-merge.pbt.test.ts tests/pbt/rag-retrieval.pbt.test.ts`
   - Ensure all tests pass; resolve any compilation or assertion failures.
   - At this point Agent 2 and Agent 3 can replace their stubs with the real implementations.
