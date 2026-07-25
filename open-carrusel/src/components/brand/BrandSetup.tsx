@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ChevronRight, ChevronLeft, Check, Palette, X } from "lucide-react";
+import {
+  ChevronRight,
+  ChevronLeft,
+  Check,
+  Palette,
+  X,
+  Globe,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ColorPicker } from "./ColorPicker";
@@ -30,6 +38,7 @@ const STYLE_OPTIONS = [
 ];
 
 const STEPS = ["Brand Name", "Colors", "Fonts", "Logo", "Style"];
+const FC_KEY_STORAGE = "open-carrusel.firecrawl-api-key";
 
 export function BrandSetup({ open, onComplete, initialBrand }: BrandSetupProps) {
   const [step, setStep] = useState(0);
@@ -37,10 +46,49 @@ export function BrandSetup({ open, onComplete, initialBrand }: BrandSetupProps) 
     initialBrand || DEFAULT_BRAND
   );
   const [saving, setSaving] = useState(false);
+  const [ingesting, setIngesting] = useState(false);
+  const [ingestMsg, setIngestMsg] = useState<string | null>(null);
+  const [ingestOk, setIngestOk] = useState<boolean | null>(null);
+  const [firecrawlKey, setFirecrawlKey] = useState("");
 
   useEffect(() => {
     if (initialBrand) setBrand(initialBrand);
   }, [initialBrand]);
+
+  useEffect(() => {
+    if (!open) return;
+    try {
+      const stored = sessionStorage.getItem(FC_KEY_STORAGE);
+      if (stored) setFirecrawlKey(stored);
+    } catch {
+      /* ignore */
+    }
+    try {
+      window.parent.postMessage(
+        { type: "liquid-copy:request-firecrawl-key" },
+        "*",
+      );
+    } catch {
+      /* not embedded */
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const onMsg = (event: MessageEvent) => {
+      if (event.data?.type !== "liquid-copy:firecrawl-key") return;
+      const key = event.data.apiKey;
+      if (typeof key === "string" && key.trim()) {
+        setFirecrawlKey(key.trim());
+        try {
+          sessionStorage.setItem(FC_KEY_STORAGE, key.trim());
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -58,6 +106,56 @@ export function BrandSetup({ open, onComplete, initialBrand }: BrandSetupProps) 
     }
   }, [brand, onComplete]);
 
+  const fillFromUrl = useCallback(async () => {
+    const url = (brand.websiteUrl ?? "").trim();
+    if (!url) {
+      setIngestOk(false);
+      setIngestMsg("Add a website URL first.");
+      return;
+    }
+    setIngesting(true);
+    setIngestMsg(null);
+    setIngestOk(null);
+    try {
+      if (firecrawlKey.trim()) {
+        try {
+          sessionStorage.setItem(FC_KEY_STORAGE, firecrawlKey.trim());
+        } catch {
+          /* ignore */
+        }
+      }
+      const res = await fetch("/api/brand/from-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url,
+          apiKey: firecrawlKey.trim() || undefined,
+          current: brand,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        brand?: BrandConfig;
+        filled?: string[];
+      };
+      if (!res.ok || !data.ok || !data.brand) {
+        setIngestOk(false);
+        setIngestMsg(data.error ?? "Could not scrape that URL.");
+        return;
+      }
+      setBrand(data.brand);
+      setIngestOk(true);
+      setIngestMsg(data.message ?? "Brand fields updated from the site.");
+    } catch (e) {
+      setIngestOk(false);
+      setIngestMsg(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setIngesting(false);
+    }
+  }, [brand, firecrawlKey]);
+
   // Escape key handler
   useEffect(() => {
     if (!open) return;
@@ -73,7 +171,9 @@ export function BrandSetup({ open, onComplete, initialBrand }: BrandSetupProps) 
   return (
     <div
       className="oc-fade fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onComplete(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onComplete();
+      }}
     >
       <div className="oc-enter-pop bg-surface rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden relative">
         {/* Close button */}
@@ -129,6 +229,66 @@ export function BrandSetup({ open, onComplete, initialBrand }: BrandSetupProps) 
                   autoFocus
                 />
               </div>
+
+              <div className="rounded-xl border border-border bg-muted/40 p-3 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Globe className="h-4 w-4 text-accent" />
+                  <label className="text-sm font-medium">
+                    Website URL (optional)
+                  </label>
+                </div>
+                <Input
+                  value={brand.websiteUrl ?? ""}
+                  onChange={(e) =>
+                    setBrand({ ...brand, websiteUrl: e.target.value })
+                  }
+                  placeholder="https://yourcompany.com"
+                  type="url"
+                  inputMode="url"
+                />
+                <Input
+                  value={firecrawlKey}
+                  onChange={(e) => setFirecrawlKey(e.target.value)}
+                  placeholder="Firecrawl API key (or set FIRECRAWL_API_KEY)"
+                  type="password"
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Firecrawl fills empty name, colors, fonts, logo, and style
+                  keywords. Fields you already set stay as-is.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={ingesting || !(brand.websiteUrl ?? "").trim()}
+                  onClick={() => void fillFromUrl()}
+                >
+                  {ingesting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Scraping with Firecrawl…
+                    </>
+                  ) : (
+                    <>
+                      <Globe className="h-4 w-4" />
+                      Fill missing fields from URL
+                    </>
+                  )}
+                </Button>
+                {ingestMsg ? (
+                  <p
+                    className={`text-xs ${
+                      ingestOk === false
+                        ? "text-destructive"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    {ingestMsg}
+                  </p>
+                ) : null}
+              </div>
+
               <p className="text-xs text-muted-foreground">
                 This helps the AI maintain your brand identity across all
                 carousels.

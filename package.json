@@ -7,13 +7,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "api:dev": "vite-node --config vitest.config.ts src/server/local-api.ts",
     "web:dev": "npm --prefix web run dev",
-    "web:build": "npm --prefix web run build"
+    "web:build": "npm --prefix web run build",
+    "carousel:dev": "npm --prefix open-carrusel run dev",
+    "dev:stack": "concurrently -k -n api,web,carousel -c blue,green,magenta \"npm run api:dev\" \"npm run web:dev\" \"npm run carousel:dev\""
   },
   "devDependencies": {
     "@types/node": "^22.13.10",
+    "concurrently": "^9.2.4",
     "fast-check": "^4.1.1",
     "typescript": "^5.8.2",
+    "vite-node": "^3.2.4",
     "vitest": "^3.0.9"
   }
 }

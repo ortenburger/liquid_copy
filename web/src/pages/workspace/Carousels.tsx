@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -8,15 +8,29 @@ import {
   openCarouselEditorUrl,
   type OpenCarouselSummary,
 } from "../../lib/open-carousel";
-import { loadSettings } from "../../lib/settings";
+import { loadSettings, subscribeSettings } from "../../lib/settings";
 import "./workspace.css";
 import "./Carousels.css";
 
 type StudioView = "home" | string;
 
+function postFirecrawlKey(frame: HTMLIFrameElement | null, targetOrigin: string) {
+  const key = loadSettings().firecrawlApiKey?.trim();
+  if (!frame?.contentWindow || !key) return;
+  try {
+    frame.contentWindow.postMessage(
+      { type: "liquid-copy:firecrawl-key", apiKey: key },
+      targetOrigin,
+    );
+  } catch {
+    /* cross-origin not ready */
+  }
+}
+
 export function CarouselsPage() {
   const settings = loadSettings();
   const baseUrl = settings.openCarouselBaseUrl || "http://localhost:3000";
+  const frameRef = useRef<HTMLIFrameElement>(null);
 
   const [busy, setBusy] = useState(false);
   const [ok, setOk] = useState<boolean | null>(null);
@@ -25,7 +39,17 @@ export function CarouselsPage() {
   const [view, setView] = useState<StudioView>("home");
 
   const iframeSrc =
-    view === "home" ? baseUrl.replace(/\/$/, "") : openCarouselEditorUrl(baseUrl, view);
+    view === "home"
+      ? baseUrl.replace(/\/$/, "")
+      : openCarouselEditorUrl(baseUrl, view);
+
+  const targetOrigin = (() => {
+    try {
+      return new URL(baseUrl).origin;
+    } catch {
+      return "http://localhost:3000";
+    }
+  })();
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -39,6 +63,23 @@ export function CarouselsPage() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const push = () => postFirecrawlKey(frameRef.current, targetOrigin);
+    push();
+    return subscribeSettings(push);
+  }, [targetOrigin, iframeSrc]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== targetOrigin) return;
+      if (event.data?.type === "liquid-copy:request-firecrawl-key") {
+        postFirecrawlKey(frameRef.current, targetOrigin);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [targetOrigin]);
 
   return (
     <div className="carousels-page">
@@ -99,7 +140,8 @@ export function CarouselsPage() {
                 >
                   <span className="carousels-list-name">{c.name}</span>
                   <span className="carousels-list-meta">
-                    {c.slideCount} slide{c.slideCount === 1 ? "" : "s"} · {c.aspectRatio}
+                    {c.slideCount} slide{c.slideCount === 1 ? "" : "s"} ·{" "}
+                    {c.aspectRatio}
                   </span>
                 </button>
               </li>
@@ -114,11 +156,13 @@ export function CarouselsPage() {
 
         <div className="carousels-stage">
           <iframe
+            ref={frameRef}
             key={iframeSrc}
             className="carousels-frame"
             title="Open Carrusel inside Liquid Copy"
             src={iframeSrc}
             allow="clipboard-read; clipboard-write"
+            onLoad={() => postFirecrawlKey(frameRef.current, targetOrigin)}
           />
         </div>
       </div>

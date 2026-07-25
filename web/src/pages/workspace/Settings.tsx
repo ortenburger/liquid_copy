@@ -5,6 +5,7 @@ import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { Toggle } from "../../components/ui/Toggle";
+import { api } from "../../lib/api";
 import { listOllamaModels, testLLMConnection } from "../../lib/llm-browser";
 import {
   PROVIDER_PRESETS,
@@ -27,6 +28,7 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [listing, setListing] = useState(false);
   const [models, setModels] = useState<string[]>([]);
+  const [apiHealth, setApiHealth] = useState<string | null>(null);
   const [testOut, setTestOut] = useState<{
     ok: boolean;
     message: string;
@@ -85,9 +87,16 @@ export function SettingsPage() {
     setTestOut(null);
   }
 
-  function onSave() {
+  async function onSave() {
     saveSettings(settings);
     setSavedAt(new Date().toLocaleTimeString());
+    if (settings.dataMode === "real" && settings.apiBaseUrl.trim()) {
+      try {
+        await api.syncConfig();
+      } catch {
+        /* API may be down — settings still saved locally */
+      }
+    }
   }
 
   function onReset() {
@@ -96,6 +105,7 @@ export function SettingsPage() {
     setSavedAt(null);
     setTestOut(null);
     setModels([]);
+    setApiHealth(null);
   }
 
   async function onTest() {
@@ -107,6 +117,32 @@ export function SettingsPage() {
       if (result.models?.length) setModels(result.models);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onPingApi() {
+    setApiHealth(null);
+    saveSettings(settings);
+    try {
+      const health = await fetch(
+        `${settings.apiBaseUrl.replace(/\/$/, "")}/api/content-creator-ai/health`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (!health.ok) {
+        setApiHealth(`API responded ${health.status}`);
+        return;
+      }
+      const body = (await health.json()) as { service?: string };
+      setApiHealth(`Connected · ${body.service ?? "ok"}`);
+      if (settings.dataMode === "real") {
+        await api.syncConfig().catch(() => undefined);
+      }
+    } catch (e) {
+      setApiHealth(
+        e instanceof Error
+          ? e.message
+          : "Cannot reach API — run npm run api:dev",
+      );
     }
   }
 
@@ -159,10 +195,30 @@ export function SettingsPage() {
             label="Liquid Copy API base URL"
             value={settings.apiBaseUrl}
             onChange={(e) => patch({ apiBaseUrl: e.target.value })}
-            placeholder="http://localhost:3001"
+            placeholder="http://localhost:8787"
             disabled={!realMode}
           />
         </div>
+        <div className="list-row-actions settings-actions">
+          <Button
+            variant="ghost"
+            disabled={!settings.apiBaseUrl.trim()}
+            onClick={() => void onPingApi()}
+          >
+            Ping API
+          </Button>
+          {apiHealth ? (
+            <Badge
+              tone={apiHealth.startsWith("Connected") ? "active" : "failed"}
+            >
+              {apiHealth}
+            </Badge>
+          ) : null}
+        </div>
+        <p className="settings-note">
+          Start the local API with <code>npm run api:dev</code> (port 8787), then
+          enable real data. Or run the full stack: <code>npm run dev:stack</code>.
+        </p>
       </section>
 
       {/* Firecrawl */}
@@ -182,9 +238,10 @@ export function SettingsPage() {
           />
         </div>
         <p className="settings-note">
-          Used by Context Agent when running against a live API. Stored locally
-          only — pass it into the API process as <code>FIRECRAWL_API_KEY</code>{" "}
-          for server-side scrapes.
+          Used by Open Carrusel brand setup (Fill from URL) when the studio is
+          embedded, and by Context Agent on a live API. Pass the same key into
+          the Open Carrusel process as <code>FIRECRAWL_API_KEY</code> if you run
+          the studio alone.
         </p>
       </section>
 

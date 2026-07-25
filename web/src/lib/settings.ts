@@ -84,10 +84,11 @@ export function defaultLLMSettings(provider: LLMProvider = "ollama"): LLMSetting
 export function defaultSettings(): AppSettings {
   return {
     dataMode: "simulation",
-    apiBaseUrl: (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
-      /\/$/,
-      "",
-    ) ?? "",
+    apiBaseUrl:
+      (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(
+        /\/$/,
+        "",
+      ) ?? "http://localhost:8787",
     firecrawlApiKey: "",
     openCarouselBaseUrl: "http://localhost:3000",
     llm: defaultLLMSettings("ollama"),

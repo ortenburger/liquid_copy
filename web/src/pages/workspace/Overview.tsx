@@ -37,6 +37,15 @@ export function OverviewPage() {
           <h1 className="page-title">Overview</h1>
         </div>
         <div className="mode-toggle" role="group" aria-label="Operating mode">
+          {!simulation ? (
+            <Button
+              variant="accent"
+              disabled={busy}
+              onClick={() => run(() => api.runWorkflow())}
+            >
+              Run workflow
+            </Button>
+          ) : null}
           <Button
             variant={
               status.mode === "Human_In_The_Loop_Mode" ? "primary" : "ghost"

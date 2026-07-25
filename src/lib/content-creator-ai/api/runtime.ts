@@ -13,6 +13,14 @@ import { CheckpointManager } from "../orchestration/checkpoints.js";
 import { WorkflowEngine } from "../orchestration/workflow-engine.js";
 import { ContextAgent } from "../agents/context-agent/index.js";
 import { AudienceAgent } from "../agents/audience-agent/index.js";
+import { FirecrawlAdapter } from "../integrations/firecrawl.js";
+import {
+  getLLMClient,
+  resetLLMClient,
+  setLLMClient,
+  OllamaLLMClient,
+  OpenAICompatibleLLMClient,
+} from "../integrations/llm.js";
 import { traceability, type TraceabilityBuilder } from "./traceability.js";
 import { SUPPORTED_PLATFORMS } from "../agents/strategy-agent/goal-validation.js";
 
@@ -29,13 +37,22 @@ export interface Runtime {
 
 let runtime: Runtime | null = null;
 
+function buildContextAgent(): ContextAgent {
+  return new ContextAgent({
+    firecrawl: new FirecrawlAdapter({
+      apiKey: process.env.FIRECRAWL_API_KEY,
+    }),
+    llm: getLLMClient(),
+  });
+}
+
 export function getRuntime(): Runtime {
   if (runtime) return runtime;
   const checkpoints = new CheckpointManager();
   runtime = {
     checkpoints,
     workflow: new WorkflowEngine({ checkpoints }),
-    contextAgent: new ContextAgent(),
+    contextAgent: buildContextAgent(),
     audienceAgent: new AudienceAgent(),
     traceability,
   };
@@ -53,6 +70,122 @@ export function resetRuntime(): Runtime {
   runtime?.checkpoints.dispose();
   runtime = null;
   return getRuntime();
+}
+
+/** Rebuild ContextAgent after Firecrawl / LLM env changes. */
+export function refreshContextAgent(): void {
+  const rt = getRuntime();
+  rt.contextAgent = buildContextAgent();
+}
+
+export interface RuntimeConfigInput {
+  firecrawlApiKey?: string;
+  llm?: {
+    provider?: string;
+    baseUrl?: string;
+    model?: string;
+    apiKey?: string;
+    temperature?: number;
+  };
+}
+
+/**
+ * Apply secrets from the operator UI (or request headers) into process env and
+ * refresh clients so the next ingest/search uses them.
+ */
+export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
+  const applied: string[] = [];
+
+  if (typeof input.firecrawlApiKey === "string" && input.firecrawlApiKey.trim()) {
+    process.env.FIRECRAWL_API_KEY = input.firecrawlApiKey.trim();
+    applied.push("firecrawlApiKey");
+  }
+
+  const llm = input.llm;
+  if (llm) {
+    if (llm.provider) {
+      process.env.LLM_PROVIDER = llm.provider;
+      applied.push("llm.provider");
+    }
+    if (llm.baseUrl?.trim()) {
+      process.env.LLM_BASE_URL = llm.baseUrl.trim().replace(/\/$/, "");
+      applied.push("llm.baseUrl");
+    }
+    if (llm.model?.trim()) {
+      process.env.LLM_MODEL = llm.model.trim();
+      applied.push("llm.model");
+    }
+    if (typeof llm.apiKey === "string") {
+      process.env.LLM_API_KEY = llm.apiKey;
+      applied.push("llm.apiKey");
+    }
+    if (typeof llm.temperature === "number") {
+      process.env.LLM_TEMPERATURE = String(llm.temperature);
+      applied.push("llm.temperature");
+    }
+
+    resetLLMClient();
+    const provider = (process.env.LLM_PROVIDER ?? "ollama").toLowerCase();
+    if (provider === "ollama") {
+      setLLMClient(
+        new OllamaLLMClient(
+          fetch,
+          process.env.LLM_BASE_URL ?? "http://127.0.0.1:11434",
+          process.env.LLM_MODEL ?? "llama3.1",
+        ),
+      );
+    } else if (
+      provider === "openai" ||
+      provider === "openai_compatible" ||
+      provider === "anthropic"
+    ) {
+      // Anthropic via OpenAI-compatible proxies is common locally; raw Anthropic
+      // Messages API is not required for the hackathon heuristic fallback path.
+      setLLMClient(
+        new OpenAICompatibleLLMClient({
+          baseUrl:
+            process.env.LLM_BASE_URL ??
+            (provider === "openai"
+              ? "https://api.openai.com/v1"
+              : "http://127.0.0.1:1234/v1"),
+          model: process.env.LLM_MODEL ?? "gpt-4o-mini",
+          apiKey: process.env.LLM_API_KEY ?? "",
+        }),
+      );
+    } else if (process.env.LLM_BASE_URL) {
+      setLLMClient(new OllamaLLMClient());
+    }
+  }
+
+  if (applied.length > 0) refreshContextAgent();
+  return applied;
+}
+
+/** Pull secrets from request headers on each call (local API server). */
+export function applyRequestSecrets(headers: Headers): void {
+  const firecrawl =
+    headers.get("x-firecrawl-api-key") ?? headers.get("X-Firecrawl-Api-Key");
+  const baseUrl =
+    headers.get("x-llm-base-url") ?? headers.get("X-LLM-Base-Url");
+  const model = headers.get("x-llm-model") ?? headers.get("X-LLM-Model");
+  const apiKey = headers.get("x-llm-api-key") ?? headers.get("X-LLM-Api-Key");
+  const provider =
+    headers.get("x-llm-provider") ?? headers.get("X-LLM-Provider");
+
+  if (!firecrawl && !baseUrl && !model && !apiKey && !provider) return;
+
+  applyRuntimeConfig({
+    firecrawlApiKey: firecrawl ?? undefined,
+    llm:
+      baseUrl || model || apiKey || provider
+        ? {
+            provider: provider ?? undefined,
+            baseUrl: baseUrl ?? undefined,
+            model: model ?? undefined,
+            apiKey: apiKey ?? undefined,
+          }
+        : undefined,
+  });
 }
 
 // ---- Manual knowledge search (Requirement 14.5) ----

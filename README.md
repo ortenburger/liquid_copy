@@ -112,7 +112,10 @@ cd open-carrusel && npm install && cd ..
 | `LLM_BASE_URL` | `http://127.0.0.1:11434` | Ollama-compatible embeddings endpoint |
 | `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model name |
 | `RAG_FORCE_LOCAL_EMBED` | unset | Set `1` to use deterministic local embeddings (tests / offline) |
-| `VITE_API_BASE_URL` | unset | Optional live API origin for the Vite UI (defaults to in-app demo store) |
+| `VITE_API_BASE_URL` | `http://localhost:8787` | Default Liquid Copy API origin for the Vite UI |
+| `PORT` / `API_PORT` | `8787` | Local API listen port (`npm run api:dev`) |
+| `FIRECRAWL_API_KEY` | unset | Context Agent + brand fill (also syncable from Settings) |
+| `LLM_BASE_URL` | unset | When set, enables Ollama (or compatible) for agents |
 
 ---
 
@@ -122,16 +125,28 @@ cd open-carrusel && npm install && cd ..
 npm test          # Run Vitest (including property-based tests)
 npm run test:watch
 npm run typecheck
-npm run web:dev   # Liquid Copy UI → http://localhost:5173
-npm run web:build
 
-# Open Carrusel
+npm run api:dev       # Liquid Copy agent API → http://localhost:8787
+npm run web:dev       # Operator UI → http://localhost:5173
+npm run carousel:dev  # Open Carrusel → http://localhost:3000
+npm run dev:stack     # All three together
+
+# Open Carrusel alone
 cd open-carrusel
 npm run setup     # First-time setup
 npm run doctor    # Environment check
 npm run dev       # http://localhost:3000
 ```
 
+### Real-data mode
+
+1. `npm run api:dev` (or `npm run dev:stack`)
+2. Open http://localhost:5173 → **Settings**
+3. Toggle **Use real data**, confirm API URL `http://localhost:8787`, **Ping API**
+4. Save Firecrawl / LLM settings (synced to the API process)
+5. Overview → **Run workflow**; Checkpoints / Platforms / Knowledge talk to the live API
+
+Simulation mode (default) keeps using in-browser fixtures and does not need the API.
 ---
 
 ## Testing

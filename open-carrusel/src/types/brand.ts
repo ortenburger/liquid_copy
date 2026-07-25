@@ -18,6 +18,8 @@ export interface CustomFont {
 
 export interface BrandConfig {
   name: string;
+  /** Optional company / product site used for Firecrawl brand fill. */
+  websiteUrl?: string;
   colors: BrandColors;
   fonts: BrandFonts;
   customFonts: CustomFont[];
@@ -29,6 +31,7 @@ export interface BrandConfig {
 
 export const DEFAULT_BRAND: BrandConfig = {
   name: "",
+  websiteUrl: "",
   colors: {
     primary: "#1a1a2e",
     secondary: "#16213e",

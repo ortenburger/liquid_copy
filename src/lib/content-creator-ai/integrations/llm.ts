@@ -103,6 +103,64 @@ export class OllamaLLMClient implements LLMClient {
   }
 }
 
+/** OpenAI-compatible chat completions (OpenAI, LM Studio, vLLM, …). */
+export class OpenAICompatibleLLMClient implements LLMClient {
+  constructor(
+    private readonly options: {
+      baseUrl: string;
+      model: string;
+      apiKey?: string;
+      fetchImpl?: typeof fetch;
+    },
+  ) {}
+
+  async complete(
+    prompt: string,
+    options: LLMCompletionOptions = {},
+  ): Promise<string | null> {
+    const attempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    const root = this.options.baseUrl.replace(/\/$/, "");
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (attempt > 1) await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 2));
+      try {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/json",
+        };
+        if (this.options.apiKey) {
+          headers.Authorization = `Bearer ${this.options.apiKey}`;
+        }
+        const messages: Array<{ role: string; content: string }> = [];
+        if (options.system) {
+          messages.push({ role: "system", content: options.system });
+        }
+        messages.push({ role: "user", content: prompt });
+        const res = await fetchImpl(`${root}/chat/completions`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: this.options.model,
+            messages,
+            temperature: options.temperature,
+          }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!res.ok) continue;
+        const data = (await res.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        const text = data.choices?.[0]?.message?.content;
+        if (typeof text === "string") return text;
+      } catch {
+        // retry
+      }
+    }
+    return null;
+  }
+}
+
 /**
  * Always-unavailable client. The default in test environments so that agent
  * logic exercises its deterministic heuristic path instead of reaching out to

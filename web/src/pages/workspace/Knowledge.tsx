@@ -3,14 +3,19 @@ import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
+import { useDataMode } from "../../lib/hooks";
 import type { RAGPassage } from "../../lib/types";
 import "./workspace.css";
 
 export function KnowledgePage() {
+  const { simulation } = useDataMode();
   const [query, setQuery] = useState("brand voice");
+  const [companyUrl, setCompanyUrl] = useState("https://");
   const [results, setResults] = useState<RAGPassage[]>([]);
   const [busy, setBusy] = useState(false);
+  const [ingestBusy, setIngestBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ingestMsg, setIngestMsg] = useState<string | null>(null);
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
@@ -26,6 +31,34 @@ export function KnowledgePage() {
     }
   }
 
+  async function onIngest(e: FormEvent) {
+    e.preventDefault();
+    setIngestBusy(true);
+    setIngestMsg(null);
+    setError(null);
+    try {
+      const result = (await api.ingestCompany(companyUrl.trim())) as {
+        status?: string;
+        warnings?: string[];
+        companySummary?: { name?: string };
+        draftId?: string;
+      };
+      setIngestMsg(
+        result.status === "firecrawl_error"
+          ? `Firecrawl error${result.warnings?.[0] ? `: ${result.warnings[0]}` : ""}`
+          : `Ingest ${result.status ?? "ok"}${
+              result.companySummary?.name
+                ? ` · ${result.companySummary.name}`
+                : ""
+            }${result.draftId ? ` · draft ${result.draftId}` : ""}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIngestBusy(false);
+    }
+  }
+
   return (
     <div className="page stagger-in">
       <header className="page-header">
@@ -34,6 +67,21 @@ export function KnowledgePage() {
           <h1 className="page-title">Knowledge</h1>
         </div>
       </header>
+
+      {!simulation ? (
+        <form className="search-form" onSubmit={onIngest}>
+          <Input
+            label="Ingest company URL (Firecrawl)"
+            value={companyUrl}
+            onChange={(e) => setCompanyUrl(e.target.value)}
+            placeholder="https://yourcompany.com"
+          />
+          <Button type="submit" variant="primary" disabled={ingestBusy}>
+            Ingest
+          </Button>
+        </form>
+      ) : null}
+      {ingestMsg ? <p className="info-banner">{ingestMsg}</p> : null}
 
       <form className="search-form" onSubmit={onSearch}>
         <Input
@@ -48,7 +96,7 @@ export function KnowledgePage() {
         </Button>
       </form>
 
-      <Progress active={busy} label="Retrieving passages" />
+      <Progress active={busy || ingestBusy} label="Talking to the knowledge layer" />
       {error ? <p className="error-banner">{error}</p> : null}
 
       {results.length === 0 && !busy ? (
@@ -59,7 +107,10 @@ export function KnowledgePage() {
       ) : (
         <ul className="list-stack">
           {results.map((passage) => (
-            <li key={`${passage.sourceDoc}-${passage.similarityScore}`} className="list-row">
+            <li
+              key={`${passage.sourceDoc}-${passage.similarityScore}-${passage.content.slice(0, 24)}`}
+              className="list-row"
+            >
               <div className="list-row-main">
                 <div className="list-row-title">
                   <span className="mono-tag">{passage.scope}</span>

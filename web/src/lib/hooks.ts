@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { api } from "./api";
+import {
+  api,
+  getLiveStatusSnapshot,
+  subscribeLiveStatus,
+} from "./api";
 import { demoStore } from "./demo-store";
 import { isDemoWorkspace, subscribeSettings } from "./settings";
 import type { WorkflowStatus } from "./types";
 
-function getSnapshot(): WorkflowStatus {
+function getDemoSnapshot(): WorkflowStatus {
   return demoStore.status();
 }
 
 function getDemoFlag(): boolean {
   return isDemoWorkspace();
+}
+
+function getLiveSnapshot(): WorkflowStatus {
+  return getLiveStatusSnapshot() ?? demoStore.status();
 }
 
 /** Re-render when Settings data-mode toggles. */
@@ -22,25 +30,31 @@ export function useDataMode(): { simulation: boolean } {
   return { simulation };
 }
 
-/** Live workflow status from the demo store (or one-shot fetch when using live API). */
+/** Live workflow status from the demo store or the local API. */
 export function useWorkflowStatus(): WorkflowStatus {
   const { simulation } = useDataMode();
   const demoStatus = useSyncExternalStore(
     demoStore.subscribe.bind(demoStore),
-    getSnapshot,
-    getSnapshot,
+    getDemoSnapshot,
+    getDemoSnapshot,
   );
-  const [live, setLive] = useState<WorkflowStatus | null>(null);
+  const liveStatus = useSyncExternalStore(
+    subscribeLiveStatus,
+    getLiveSnapshot,
+    getLiveSnapshot,
+  );
 
   useEffect(() => {
-    if (simulation) {
-      setLive(null);
-      return;
-    }
-    void api.getWorkflowStatus().then(setLive).catch(() => setLive(null));
+    if (simulation) return;
+    void api.syncConfig().catch(() => undefined);
+    void api.getWorkflowStatus().catch(() => undefined);
+    const id = window.setInterval(() => {
+      void api.getWorkflowStatus().catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(id);
   }, [simulation]);
 
-  return !simulation && live ? live : demoStatus;
+  return simulation ? demoStatus : liveStatus;
 }
 
 export function useAsyncAction() {

@@ -18,6 +18,10 @@ export async function updateBrand(
     ...updates,
     colors: { ...current.colors, ...updates.colors },
     fonts: { ...current.fonts, ...updates.fonts },
+    websiteUrl:
+      updates.websiteUrl !== undefined
+        ? updates.websiteUrl
+        : current.websiteUrl,
     updatedAt: now(),
     createdAt: current.createdAt || now(),
   };
