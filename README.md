@@ -143,13 +143,70 @@ npm run dev       # http://localhost:3000
 1. `npm run api:dev` (or `npm run dev:stack`)
 2. Open http://localhost:5173 → **Settings**
 3. Toggle **Use real data**, confirm API URL `http://localhost:8787`, **Ping API**
-4. Save Firecrawl / LLM settings (synced to the API process)
-5. Overview → **Run workflow**; Checkpoints / Platforms / Knowledge talk to the live API
+4. Save Firecrawl / LLM / Zernio settings (synced to the API process)
 
 Simulation mode (default) keeps using in-browser fixtures and does not need the API.
+
 ---
 
-## Testing
+## How to test (Simple UI end-to-end)
+
+Use this path to go from a website scrape to carousels posted in Zernio.
+
+### 1. Start the stack
+
+```bash
+npm run dev:stack
+```
+
+- UI: http://localhost:5173  
+- API: http://localhost:8787  
+- Open Carrusel: http://localhost:3000  
+
+### 2. Configure Settings
+
+Open **Settings** and:
+
+1. Turn on **Simple UI**
+2. Turn on **Use real data**
+3. Add your **Firecrawl** API key
+4. Add your **Zernio** API key (base URL `https://zernio.com/api/v1`; optional account ID / platform)
+5. Install [Ollama](https://ollama.com) locally **or** set an API key for your LLM provider (OpenAI / Anthropic / compatible), then pick model + base URL
+6. Confirm Open Carrusel base URL is `http://localhost:3000`
+7. **Save** (and **Ping API** if you want a quick health check)
+
+For Ollama, a typical setup is:
+
+```bash
+ollama pull llama3.1
+# optional embeddings for RAG
+ollama pull nomic-embed-text
+```
+
+### 3. Chat — scrape your website into RAG
+
+1. Go to **Chat**
+2. Ask the agent to scrape your website and fill in relevant business data, e.g.  
+   `Ingest https://your-company.com and save the company profile to the knowledge base / RAG.`
+3. Wait until the agent confirms the data was saved to RAG / the knowledge base
+
+### 4. Plan — generate the testing plan
+
+1. Go to **Plan**
+2. Click **Generate plan**
+3. Wait for:
+   - 7 hypotheses grounded in RAG/KB (via your LLM)
+   - One carousel per hypothesis for the next 7 days
+
+### 5. Queue all to Zernio
+
+1. Still on **Plan**, click **Queue all to Zernio**
+2. Open [Zernio](https://zernio.com) → **Posts**
+3. You should see the carousels posted (or saved as drafts if no social account is connected)
+
+---
+
+## Automated tests
 
 Property-based tests (fast-check, ≥100 runs where specified) live in `tests/pbt/`.
 
@@ -162,6 +219,7 @@ npx vitest --run tests/pbt/kb-merge.pbt.test.ts tests/pbt/rag-retrieval.pbt.test
 Each property test is tagged: `// Feature: content-creator-ai, Property N: …`
 
 ---
+
 
 ## Importing the shared library
 

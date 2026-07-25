@@ -28,8 +28,10 @@
 
 .shell-brand-img {
   display: block;
-  height: 32px;
+  height: 36px;
   width: auto;
+  max-width: min(220px, 48vw);
+  object-fit: contain;
 }
 
 .shell-nav {
