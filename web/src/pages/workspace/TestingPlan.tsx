@@ -9,7 +9,6 @@ import {
   useAsyncAction,
   useDataMode,
   useLiveStatusError,
-  useWorkflowStatus,
 } from "../../lib/hooks";
 import {
   openCarouselEditorUrl,
@@ -18,6 +17,7 @@ import {
 import { loadSettings } from "../../lib/settings";
 import type {
   HypothesisCard,
+  RoadmapSummary,
   WeekPostingPlan,
 } from "../../lib/types";
 import "./workspace.css";
@@ -52,16 +52,15 @@ function formatSlotWhen(iso: string) {
 
 export function TestingPlanPage() {
   const { simulation } = useDataMode();
-  const workflowStatus = useWorkflowStatus();
   const liveError = useLiveStatusError();
   const { busy, error: actionError, run, clearError } = useAsyncAction();
+  const [roadmap, setRoadmap] = useState<RoadmapSummary | null>(null);
   const [hypotheses, setHypotheses] = useState<HypothesisCard[]>([]);
   const [weekPlan, setWeekPlan] = useState<WeekPostingPlan | null>(null);
-  const [planCarousels, setPlanCarousels] = useState<OpenCarouselItem[]>([]);
-  const [planMarkdown, setPlanMarkdown] = useState<string | null>(null);
+  const [carousels, setCarousels] = useState<OpenCarouselItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [progressLabel, setProgressLabel] = useState("Updating testing plan");
+  const [progressLabel, setProgressLabel] = useState("Updating plan");
   const [reloadKey, setReloadKey] = useState(0);
 
   const reload = useCallback(() => {
@@ -72,15 +71,15 @@ export function TestingPlanPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const [plan, central] = await Promise.all([
+        const [plan, week] = await Promise.all([
           api.getTestingPlan(),
-          api.getCentralPlanDocument(),
+          Promise.resolve(api.getWeekPostingPlan()),
         ]);
         if (cancelled) return;
+        setRoadmap(plan.roadmap);
         setHypotheses(plan.hypotheses);
-        setWeekPlan(central.plan);
-        setPlanCarousels(central.carousels);
-        setPlanMarkdown(central.markdown);
+        setWeekPlan(week.plan);
+        setCarousels(week.carousels);
         setError(null);
       } catch (e) {
         if (!cancelled) {
@@ -88,100 +87,108 @@ export function TestingPlanPage() {
         }
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [
-    simulation,
-    reloadKey,
-    workflowStatus.currentStage,
-    workflowStatus.stages.map((s) => `${s.stage}:${s.status}`).join("|"),
-  ]);
+  }, [simulation, reloadKey]);
 
   const carouselById = useMemo(() => {
     const map = new Map<string, OpenCarouselItem>();
-    for (const c of planCarousels) map.set(c.id, c);
+    for (const c of carousels) map.set(c.id, c);
     return map;
-  }, [planCarousels]);
+  }, [carousels]);
 
-  async function onBuildWeekPlan() {
+  async function onGenerate() {
     clearError();
     setMsg(null);
-    setProgressLabel("Building week plan");
     await run(async () => {
-      const result = await api.generateWeekPostingPlan({
-        onProgress: (m) => setProgressLabel(m),
-      });
-      setHypotheses(result.hypotheses);
-      setWeekPlan(result.plan);
-      setPlanCarousels(result.carousels);
-      setPlanMarkdown(result.markdown);
-      setMsg(
-        `Week plan ready — ${result.plan.slots.length} carousel${result.plan.slots.length === 1 ? "" : "s"} saved to testing-plan.md.`,
-      );
-      setProgressLabel("Updating testing plan");
+      if (simulation) {
+        setProgressLabel("Loading demo plan…");
+        await api.kickstartPlan();
+        setProgressLabel("Building 7-day carousels…");
+        const result = await api.generateWeekPostingPlan({
+          startFrom: "today",
+          onProgress: setProgressLabel,
+        });
+        setRoadmap({
+          title: "Next 7 days",
+          summary: result.plan.summary,
+          weeks: result.hypotheses.map((h, i) => ({
+            week: i + 1,
+            theme: h.title ?? h.hook.slice(0, 48),
+            objective: [h.hook, h.angle].filter(Boolean).join(" — "),
+          })),
+        });
+        setHypotheses(result.hypotheses);
+        setWeekPlan(result.plan);
+        setCarousels(result.carousels);
+        setMsg(
+          `Demo plan ready — ${result.plan.slots.length} hypotheses + carousels for the next 7 days.`,
+        );
+      } else {
+        setProgressLabel("Generating from RAG + Ollama…");
+        const result = await api.generateSevenDayPlan({
+          onProgress: setProgressLabel,
+        });
+        setRoadmap(result.roadmap);
+        setHypotheses(result.hypotheses);
+        setWeekPlan(result.plan);
+        setCarousels(result.carousels);
+        setMsg(
+          `7-day plan ready — ${result.hypotheses.length} RAG/Ollama hypotheses, one carousel each.`,
+        );
+      }
+      setProgressLabel("Updating plan");
     });
   }
 
-  async function onKickstartHypotheses() {
-    clearError();
-    setMsg(null);
-    setProgressLabel("Loading hypotheses");
-    await run(async () => {
-      await api.kickstartPlan();
+  function openStudio(carousel: OpenCarouselItem) {
+    if (simulation || carousel.id.startsWith("demo-oc-")) {
       setMsg(
-        simulation
-          ? "Hypotheses refreshed from demo plan."
-          : "Workflow started — hypotheses will appear as stages complete.",
+        `Demo carousel “${carousel.name}” — switch to Live + Open Carrusel to edit.`,
       );
-      reload();
-    });
+      return;
+    }
+    window.open(
+      openCarouselEditorUrl(loadSettings().openCarouselBaseUrl, carousel.id),
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
 
   async function onQueueAllToZernio() {
     clearError();
     setMsg(null);
-    setProgressLabel("Queuing carousels to Zernio");
     await run(async () => {
+      setProgressLabel("Queuing all carousels to Zernio…");
       const result = await api.queueWeekPlanToZernio({
-        onProgress: (m) => setProgressLabel(m),
+        onProgress: setProgressLabel,
       });
-      setPlanCarousels(result.carousels);
+      setCarousels(result.carousels);
       setMsg(result.message);
       if (!result.ok) {
         setError(
           `${result.failed} carousel${result.failed === 1 ? "" : "s"} failed — check Settings / Zernio key, or retry.`,
         );
       }
-      setProgressLabel("Updating testing plan");
+      setProgressLabel("Updating plan");
     });
   }
 
-  function openStudio(carousel: OpenCarouselItem) {
-    if (simulation || carousel.id.startsWith("demo-oc-")) {
-      setMsg(`Demo carousel “${carousel.name}” — switch to Live + Open Carrusel to edit.`);
-      return;
-    }
-    const url = openCarouselEditorUrl(
-      loadSettings().openCarouselBaseUrl,
-      carousel.id,
-    );
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-
-  const hasHypotheses = hypotheses.length > 0;
-  const hasWeekSlots = Boolean(weekPlan && weekPlan.slots.length > 0);
-  const pendingZernioCount = planCarousels.filter(
+  const hasPlan = Boolean(
+    roadmap || hypotheses.length > 0 || (weekPlan && weekPlan.slots.length > 0),
+  );
+  const pendingZernioCount = carousels.filter(
     (c) => c.status !== "published" && c.status !== "publishing",
   ).length;
+  const hasWeekSlots = Boolean(weekPlan && weekPlan.slots.length > 0);
   const displayError = error ?? actionError ?? liveError;
 
   return (
     <div className="page stagger-in">
       <header className="page-header">
         <div>
-          <p className="eyebrow">One week of tests</p>
+          <p className="eyebrow">Next 7 days</p>
           <h1 className="page-title">Plan</h1>
         </div>
         <div className="mode-toggle">
@@ -190,19 +197,21 @@ export function TestingPlanPage() {
           </Badge>
           <Button
             variant="accent"
-            disabled={busy || !hasHypotheses}
-            onClick={() => void onBuildWeekPlan()}
+            disabled={busy}
+            onClick={() => void onGenerate()}
           >
-            {hasWeekSlots ? "Rebuild week plan" : "Plan this week"}
+            {hasPlan ? "Regenerate" : "Generate plan"}
           </Button>
           <Button
-            variant="ghost"
-            disabled={busy}
-            onClick={() => void onKickstartHypotheses()}
+            variant="primary"
+            disabled={busy || !hasWeekSlots || pendingZernioCount === 0}
+            onClick={() => void onQueueAllToZernio()}
           >
-            {hasHypotheses ? "Refresh hypotheses" : "Load hypotheses"}
+            {pendingZernioCount === 0 && hasWeekSlots
+              ? "All queued"
+              : `Queue all to Zernio${hasWeekSlots ? ` (${pendingZernioCount})` : ""}`}
           </Button>
-          {hasHypotheses || planMarkdown || hasWeekSlots ? (
+          {hasPlan ? (
             <Button variant="ghost" disabled={busy} onClick={reload}>
               Refresh
             </Button>
@@ -211,9 +220,10 @@ export function TestingPlanPage() {
       </header>
 
       <p className="page-lead">
-        One central plan lives as <code>testing-plan.md</code> in the knowledge
-        base. Building the week plan rewrites that document, generates a
-        carousel per hypothesis, and lets you queue everything to Zernio.
+        {simulation
+          ? "Demo mode loads sample hypotheses and carousels for the next 7 days."
+          : "Live mode pulls RAG/KB context, drafts 7 hypotheses with your LLM (Ollama), and builds one carousel per day."}{" "}
+        Ask <Link to="/app">Chat</Link> to refine.
       </p>
 
       <Progress active={busy} label={progressLabel} />
@@ -222,17 +232,35 @@ export function TestingPlanPage() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Central plan document</h2>
-          <span className="panel-meta">testing-plan.md</span>
+          <h2 className="panel-title">{roadmap?.title ?? "Roadmap · 7 days"}</h2>
+          <span className="panel-meta">
+            {roadmap ? `${roadmap.weeks.length} days` : "pending"}
+          </span>
         </div>
-        {planMarkdown ? (
-          <pre className="checkpoint-output" style={{ maxHeight: 320 }}>
-            {planMarkdown}
-          </pre>
+        {roadmap ? (
+          <>
+            <p className="page-lead" style={{ marginBottom: "var(--space-md)" }}>
+              {roadmap.summary}
+            </p>
+            <ol className="stage-rail" aria-label="Seven-day roadmap">
+              {roadmap.weeks.map((w) => (
+                <li key={w.week} className="stage-item">
+                  <div className="stage-top">
+                    <span className="stage-index" aria-hidden>
+                      {String(w.week).padStart(2, "0")}
+                    </span>
+                    <span className="stage-name">{w.theme}</span>
+                    <Badge tone="idle">Day {w.week}</Badge>
+                  </div>
+                  <p className="stage-summary">{w.objective}</p>
+                </li>
+              ))}
+            </ol>
+          </>
         ) : (
           <p className="empty-state">
-            No <code>testing-plan.md</code> yet. Load hypotheses, then{" "}
-            <strong>Plan this week</strong> to create it.
+            No roadmap yet. Press <strong>Generate plan</strong>
+            {!simulation ? " (needs KB/RAG + Ollama)" : null}.
           </p>
         )}
       </section>
@@ -240,18 +268,11 @@ export function TestingPlanPage() {
       <section className="panel">
         <div className="panel-head">
           <h2 className="panel-title">Hypotheses to test</h2>
-          <span className="panel-meta">{hypotheses.length} total</span>
+          <span className="panel-meta">{hypotheses.length}</span>
         </div>
         {hypotheses.length === 0 ? (
           <p className="empty-state">
-            No hypotheses yet. Press <strong>Load hypotheses</strong>
-            {!simulation ? (
-              <>
-                {" "}
-                or ask <Link to="/app">Chat</Link> after the workflow advances
-              </>
-            ) : null}
-            .
+            No hypotheses yet. Generate a plan to draft the next 7 days.
           </p>
         ) : (
           <ul className="list-stack">
@@ -282,19 +303,22 @@ export function TestingPlanPage() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">This week&apos;s posting plan</h2>
+          <h2 className="panel-title">Carousels · next 7 days</h2>
           <span className="panel-meta">
-            {hasWeekSlots
-              ? `${weekPlan!.slots.length} post${weekPlan!.slots.length === 1 ? "" : "s"}`
+            {weekPlan?.slots.length
+              ? `${weekPlan.slots.length} scheduled`
               : "not built"}
           </span>
         </div>
-        {hasWeekSlots && weekPlan ? (
+        {weekPlan && weekPlan.slots.length > 0 ? (
           <>
             <p className="page-lead" style={{ marginBottom: "var(--space-md)" }}>
               {weekPlan.summary}
             </p>
-            <div className="list-row-actions" style={{ marginBottom: "var(--space-md)" }}>
+            <div
+              className="list-row-actions"
+              style={{ marginBottom: "var(--space-md)" }}
+            >
               <Button
                 variant="accent"
                 disabled={busy || pendingZernioCount === 0}
@@ -304,12 +328,10 @@ export function TestingPlanPage() {
                   ? "Queuing…"
                   : pendingZernioCount === 0
                     ? "All queued in Zernio"
-                    : simulation
-                      ? `Simulate all in Zernio (${pendingZernioCount})`
-                      : `Queue all in Zernio (${pendingZernioCount})`}
+                    : `Queue all to Zernio (${pendingZernioCount})`}
               </Button>
             </div>
-            <ol className="posting-plan" aria-label="Week posting plan">
+            <ol className="posting-plan" aria-label="Seven-day carousel plan">
               {weekPlan.slots.map((slot) => {
                 const carousel = carouselById.get(slot.carouselId);
                 return (
@@ -328,11 +350,11 @@ export function TestingPlanPage() {
                       <CarouselCardGrid
                         carousels={[carousel]}
                         onOpen={openStudio}
-                        emptyLabel="Carousel missing — rebuild the week plan."
+                        emptyLabel="Carousel missing — regenerate the plan."
                       />
                     ) : (
                       <p className="empty-state">
-                        Carousel missing for this hypothesis. Rebuild the week
+                        Carousel missing for this hypothesis. Regenerate the
                         plan.
                       </p>
                     )}
@@ -343,14 +365,9 @@ export function TestingPlanPage() {
           </>
         ) : (
           <p className="empty-state">
-            {hasHypotheses ? (
-              <>
-                Press <strong>Plan this week</strong> to schedule hypotheses and
-                generate one carousel each.
-              </>
-            ) : (
-              <>Load hypotheses first, then build the week plan.</>
-            )}
+            Generate a plan to create one carousel per hypothesis for the next 7
+            days
+            {!simulation ? " (Open Carrusel must be running)" : null}.
           </p>
         )}
       </section>

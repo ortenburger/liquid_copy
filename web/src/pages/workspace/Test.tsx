@@ -224,7 +224,7 @@ export function TestPage() {
         {msg ? (
           <p className="info-banner">
             {msg}{" "}
-            <Link to="/app/analytics">Open Analytics →</Link>
+            <Link to="/app/insights">Open Insights →</Link>
           </p>
         ) : null}
         {displayError ? <p className="error-banner">{displayError}</p> : null}

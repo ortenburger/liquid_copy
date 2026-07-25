@@ -213,53 +213,62 @@ function findRoute(
   return null;
 }
 
-const server = createServer((req, res) => {
-  void (async () => {
-    try {
-      const method = (req.method ?? "GET").toUpperCase();
-      if (method === "OPTIONS") {
-        res.writeHead(204, CORS_HEADERS);
-        res.end();
-        return;
-      }
+type GlobalApi = typeof globalThis & {
+  __liquidCopyApiServer?: ReturnType<typeof createServer>;
+  __liquidCopyApiSignalsBound?: boolean;
+};
 
-      const host = req.headers.host ?? `${HOST}:${PORT}`;
-      const url = new URL(req.url ?? "/", `http://${host}`);
-      const matched = findRoute(method, url.pathname);
-      if (!matched) {
-        res.writeHead(404, {
-          ...CORS_HEADERS,
-          "Content-Type": "application/json",
+const g = globalThis as GlobalApi;
+
+function createApiServer() {
+  return createServer((req, res) => {
+    void (async () => {
+      try {
+        const method = (req.method ?? "GET").toUpperCase();
+        if (method === "OPTIONS") {
+          res.writeHead(204, CORS_HEADERS);
+          res.end();
+          return;
+        }
+
+        const host = req.headers.host ?? `${HOST}:${PORT}`;
+        const url = new URL(req.url ?? "/", `http://${host}`);
+        const matched = findRoute(method, url.pathname);
+        if (!matched) {
+          res.writeHead(404, {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json",
+          });
+          res.end(
+            JSON.stringify({
+              error: `No route for ${method} ${url.pathname}`,
+              hint: "Try GET /api/content-creator-ai/health",
+            }),
+          );
+          return;
+        }
+
+        const request = await toWebRequest(req);
+        applyRequestSecrets(request.headers);
+
+        const response = await matched.route.handler(request, {
+          params: matched.params,
         });
-        res.end(
-          JSON.stringify({
-            error: `No route for ${method} ${url.pathname}`,
-            hint: "Try GET /api/content-creator-ai/health",
-          }),
-        );
-        return;
+        await writeWebResponse(res, response);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[liquid-copy-api]", message);
+        if (!res.headersSent) {
+          res.writeHead(500, {
+            ...CORS_HEADERS,
+            "Content-Type": "application/json",
+          });
+        }
+        res.end(JSON.stringify({ error: message }));
       }
-
-      const request = await toWebRequest(req);
-      applyRequestSecrets(request.headers);
-
-      const response = await matched.route.handler(request, {
-        params: matched.params,
-      });
-      await writeWebResponse(res, response);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[liquid-copy-api]", message);
-      if (!res.headersSent) {
-        res.writeHead(500, {
-          ...CORS_HEADERS,
-          "Content-Type": "application/json",
-        });
-      }
-      res.end(JSON.stringify({ error: message }));
-    }
-  })();
-});
+    })();
+  });
+}
 
 function onListening(): void {
   console.log(`[liquid-copy-api] listening on http://${HOST}:${PORT}`);
@@ -278,12 +287,15 @@ function onListening(): void {
   }
 }
 
-function listenWithRetry(attempt = 0): void {
+function listenWithRetry(
+  server: ReturnType<typeof createServer>,
+  attempt = 0,
+): void {
   const onError = (err: NodeJS.ErrnoException) => {
     server.off("listening", onListening);
-    if (err.code === "EADDRINUSE" && attempt < 20) {
+    if (err.code === "EADDRINUSE" && attempt < 30) {
       // vite-node --watch can restart before the previous listener releases the port
-      setTimeout(() => listenWithRetry(attempt + 1), 150);
+      setTimeout(() => listenWithRetry(server, attempt + 1), 100);
       return;
     }
     if (err.code === "EADDRINUSE") {
@@ -305,11 +317,35 @@ function listenWithRetry(attempt = 0): void {
 
 function shutdown(signal: string): void {
   console.log(`[liquid-copy-api] ${signal} — closing`);
+  const server = g.__liquidCopyApiServer;
+  if (!server) {
+    process.exit(0);
+    return;
+  }
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500).unref();
 }
 
-process.once("SIGTERM", () => shutdown("SIGTERM"));
-process.once("SIGINT", () => shutdown("SIGINT"));
+if (!g.__liquidCopyApiSignalsBound) {
+  g.__liquidCopyApiSignalsBound = true;
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
 
-listenWithRetry();
+async function start(): Promise<void> {
+  const previous = g.__liquidCopyApiServer;
+  if (previous) {
+    await new Promise<void>((resolve) => {
+      previous.close(() => resolve());
+      // Don't hang forever if close never fires
+      setTimeout(() => resolve(), 1000).unref();
+    });
+    g.__liquidCopyApiServer = undefined;
+  }
+
+  const server = createApiServer();
+  g.__liquidCopyApiServer = server;
+  listenWithRetry(server);
+}
+
+void start();

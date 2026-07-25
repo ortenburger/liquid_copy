@@ -29,7 +29,9 @@ import {
   parseCentralPlanMarkdown,
 } from "./central-plan";
 import {
+  loadSevenDayPlanSnapshot,
   loadWeekPostingPlan,
+  saveSevenDayPlanSnapshot,
   saveWeekPostingPlan,
 } from "./posting-plan-store";
 import {
@@ -70,16 +72,6 @@ import type {
 } from "./types";
 import { CHECKPOINT_STAGES, WORKFLOW_STAGES } from "./types";
 
-const WEEKDAY_LABELS = [
-  "Mon",
-  "Tue",
-  "Wed",
-  "Thu",
-  "Fri",
-  "Sat",
-  "Sun",
-] as const;
-
 function startOfWeekMonday(d = new Date()): Date {
   const date = new Date(d);
   date.setHours(10, 0, 0, 0);
@@ -89,12 +81,81 @@ function startOfWeekMonday(d = new Date()): Date {
   return date;
 }
 
+function startOfToday(d = new Date()): Date {
+  const date = new Date(d);
+  date.setHours(10, 0, 0, 0);
+  return date;
+}
+
 function aspectForPlatform(
   platform: SocialPlatform,
 ): "1:1" | "4:5" | "9:16" {
   if (platform === "tiktok" || platform === "youtube_shorts") return "9:16";
   if (platform === "instagram") return "4:5";
   return "4:5";
+}
+
+const PLAN_PLATFORMS: SocialPlatform[] = [
+  "linkedin",
+  "instagram",
+  "tiktok",
+  "threads",
+  "x",
+];
+
+function normalizePlanPlatform(raw: unknown): SocialPlatform {
+  const p = String(raw ?? "")
+    .toLowerCase()
+    .trim();
+  if (p === "twitter") return "x";
+  if ((PLAN_PLATFORMS as string[]).includes(p)) return p as SocialPlatform;
+  return "linkedin";
+}
+
+function parseHypothesesJson(raw: string): HypothesisCard[] {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const text = (fenced?.[1] ?? raw).trim();
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start < 0 || end <= start) return [];
+  try {
+    const parsed = JSON.parse(text.slice(start, end + 1)) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, i): HypothesisCard | null => {
+        if (!item || typeof item !== "object") return null;
+        const o = item as Record<string, unknown>;
+        const hook = String(o.hook ?? "").trim();
+        if (!hook) return null;
+        const title = String(o.title ?? "").trim() || hook.slice(0, 72);
+        const angle = String(o.angle ?? "").trim() || undefined;
+        return {
+          id: `hyp-7d-${Date.now().toString(36)}-${i}`,
+          title,
+          hook,
+          angle,
+          platform: normalizePlanPlatform(o.platform),
+          status: "queued",
+        };
+      })
+      .filter((h): h is HypothesisCard => Boolean(h))
+      .slice(0, 7);
+  } catch {
+    return [];
+  }
+}
+
+function roadmapFromSevenDayHyps(hyps: HypothesisCard[]): RoadmapSummary {
+  return {
+    title: "Next 7 days",
+    summary:
+      "RAG-grounded hypotheses for the coming week — one carousel experiment per day.",
+    weeks: hyps.map((h, i) => ({
+      week: i + 1,
+      theme: h.title ?? h.hook.slice(0, 48),
+      objective: [h.hook, h.angle].filter(Boolean).join(" — "),
+    })),
+  };
 }
 
 export type {
@@ -1037,7 +1098,7 @@ Answer:`;
               carouselId: item.id,
               name: item.name,
               slideCount: item.slideCount,
-              message: `Queued. Open Test to preview/publish.`,
+              message: `Queued. Review the Plan or ask Chat to publish.`,
             },
             null,
             2,
@@ -1570,6 +1631,16 @@ Answer:`;
     roadmapText: string | null;
     hypotheses: HypothesisCard[];
   }> {
+    // Prefer Plan-tab 7-day snapshot (works without workflow checkpoints).
+    const sevenDay = loadSevenDayPlanSnapshot();
+    if (sevenDay) {
+      return {
+        roadmap: sevenDay.roadmap,
+        roadmapText: null,
+        hypotheses: sevenDay.hypotheses,
+      };
+    }
+
     if (!useLive()) {
       return {
         roadmap: demoStore.getRoadmapSummary(),
@@ -1807,18 +1878,148 @@ Answer:`;
   },
 
   /**
-   * Minimal week workflow (separate from full kickstart):
-   * take current hypotheses → one-week posting schedule → carousel per hyp.
+   * Real-mode Plan tab: RAG → Ollama hypotheses for the next 7 days →
+   * one carousel per hypothesis, shown on the Plan page.
+   */
+  async generateSevenDayPlan(options?: {
+    onProgress?: (msg: string) => void;
+  }): Promise<{
+    plan: WeekPostingPlan;
+    carousels: OpenCarouselItem[];
+    hypotheses: HypothesisCard[];
+    roadmap: RoadmapSummary;
+    markdown: string;
+  }> {
+    const llm = loadSettings().llm;
+    options?.onProgress?.("Retrieving RAG + KB context…");
+    const { passages, markdownSources } = await this.gatherRagMarkdownContext(
+      "content experiment hypotheses hooks audience platforms next seven days",
+      { limit: 8 },
+    );
+
+    const passageBlock =
+      passages.length === 0
+        ? "(No RAG passages — invent grounded B2B/content-marketing tests.)"
+        : passages
+            .map(
+              (p, i) =>
+                `[${i + 1}] ${p.sourceDoc}: ${p.content.slice(0, 420)}`,
+            )
+            .join("\n\n");
+    const markdownBlock =
+      markdownSources.length === 0
+        ? "(No KB markdown.)"
+        : markdownSources
+            .map((m) => `--- ${m.entityId} ---\n${m.markdown.slice(0, 1200)}`)
+            .join("\n\n");
+
+    options?.onProgress?.(
+      `Drafting 7 hypotheses with ${llm.provider}/${llm.model}…`,
+    );
+    const prompt = `You are Liquid Copy's experimentation planner. Using ONLY the company context below, invent exactly 7 distinct content hypotheses to test over the next 7 days (one per day).
+
+Return ONLY a JSON array (no prose) of 7 objects:
+[{"title":"short name","hook":"scroll-stopping first line","angle":"why this might win","platform":"linkedin|instagram|tiktok|threads|x"}]
+
+Rules:
+- Hooks must be specific to this company/audience, not generic marketing fluff
+- Vary platforms when context allows; default linkedin
+- Each hypothesis must be testable in a short carousel
+
+RAG passages:
+${passageBlock}
+
+KB markdown:
+${markdownBlock}
+
+JSON:`;
+
+    let hypotheses: HypothesisCard[] = [];
+    try {
+      const raw = await completeWithSettings(llm, prompt);
+      hypotheses = parseHypothesesJson(raw);
+    } catch {
+      hypotheses = [];
+    }
+
+    if (hypotheses.length === 0) {
+      // Fallback: derive hooks from top RAG snippets so the UI still fills.
+      const seeds =
+        passages.length > 0
+          ? passages.slice(0, 7)
+          : markdownSources.slice(0, 7).map((m) => ({
+              content: m.markdown.slice(0, 160),
+              sourceDoc: m.entityId,
+              similarityScore: 0,
+              scope: "identity" as const,
+            }));
+      hypotheses = Array.from({ length: 7 }, (_, i) => {
+        const seed = seeds[i % Math.max(seeds.length, 1)];
+        const snippet =
+          seed && "content" in seed
+            ? String(seed.content).replace(/\s+/g, " ").trim().slice(0, 100)
+            : "Prove one concrete claim this week";
+        return {
+          id: `hyp-7d-fallback-${Date.now().toString(36)}-${i}`,
+          title: `Day ${i + 1} test`,
+          hook: snippet.endsWith("?") ? snippet : `${snippet}?`,
+          angle: "Derived from knowledge base when the model returned no JSON.",
+          platform: PLAN_PLATFORMS[i % PLAN_PLATFORMS.length]!,
+          status: "queued" as const,
+        };
+      });
+    }
+
+    while (hypotheses.length < 7) {
+      const i = hypotheses.length;
+      hypotheses.push({
+        id: `hyp-7d-pad-${Date.now().toString(36)}-${i}`,
+        title: `Day ${i + 1} test`,
+        hook: "What if we named the friction your buyers feel every Monday?",
+        angle: "Pad slot so the week has one carousel per day.",
+        platform: PLAN_PLATFORMS[i % PLAN_PLATFORMS.length]!,
+        status: "queued",
+      });
+    }
+    hypotheses = hypotheses.slice(0, 7);
+
+    const roadmap = roadmapFromSevenDayHyps(hypotheses);
+    // Persist locally — do not require workflow checkpoints (RoadmapReview idle).
+    options?.onProgress?.("Saving hypotheses + 7-day roadmap…");
+    saveSevenDayPlanSnapshot({ roadmap, hypotheses });
+
+    const built = await this.generateWeekPostingPlan({
+      onProgress: options?.onProgress,
+      hypotheses,
+      startFrom: "today",
+    });
+
+    return {
+      ...built,
+      hypotheses,
+      roadmap,
+    };
+  },
+
+  /**
+   * Take hypotheses → 7-day posting schedule → carousel per hyp.
    */
   async generateWeekPostingPlan(options?: {
     onProgress?: (msg: string) => void;
+    /** Prefer these hypotheses instead of reloading from getTestingPlan. */
+    hypotheses?: HypothesisCard[];
+    /** Schedule from today (next 7 days) or from Monday. Default monday. */
+    startFrom?: "today" | "monday";
   }): Promise<{
     plan: WeekPostingPlan;
     carousels: OpenCarouselItem[];
     hypotheses: HypothesisCard[];
     markdown: string;
   }> {
-    const { hypotheses } = await this.getTestingPlan();
+    const loaded = options?.hypotheses?.length
+      ? { hypotheses: options.hypotheses }
+      : await this.getTestingPlan();
+    const hypotheses = loaded.hypotheses;
     if (hypotheses.length === 0) {
       throw new Error(
         "No hypotheses yet. Generate a plan first, or add hypotheses via Chat.",
@@ -1829,17 +2030,22 @@ Answer:`;
       (h) => h.status !== "won" && h.status !== "failed",
     );
     const selected = (testable.length > 0 ? testable : hypotheses).slice(0, 7);
-    const weekStart = startOfWeekMonday();
+    const weekStart =
+      options?.startFrom === "today" ? startOfToday() : startOfWeekMonday();
     const slots: PostingPlanSlot[] = [];
     const carousels: OpenCarouselItem[] = [];
 
     for (let i = 0; i < selected.length; i++) {
       const hyp = selected[i]!;
-      const dayIndex = i; // one post per weekday, up to 7
+      const dayIndex = i;
       const scheduled = new Date(weekStart);
       scheduled.setDate(weekStart.getDate() + dayIndex);
       const scheduledAt = scheduled.toISOString();
-      const dayLabel = WEEKDAY_LABELS[dayIndex] ?? `Day ${dayIndex + 1}`;
+      const dayLabel = scheduled.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      });
       options?.onProgress?.(
         `Carousel ${i + 1}/${selected.length}: ${hyp.title ?? hyp.hook}`,
       );
@@ -1879,7 +2085,7 @@ Answer:`;
 
     const plan: WeekPostingPlan = {
       weekStart: weekStart.toISOString(),
-      summary: `${slots.length} hypothesis test${slots.length === 1 ? "" : "s"} scheduled this week — one carousel each.`,
+      summary: `${slots.length} hypothesis test${slots.length === 1 ? "" : "s"} over the next 7 days — one carousel each.`,
       slots,
       createdAt: new Date().toISOString(),
     };
@@ -1891,12 +2097,16 @@ Answer:`;
       hypotheses,
       carousels,
     });
-    await this.saveToRag({
-      entityId: CENTRAL_PLAN_ENTITY_ID,
-      entityType: "company_identity",
-      markdown,
-      append: false,
-    });
+    try {
+      await this.saveToRag({
+        entityId: CENTRAL_PLAN_ENTITY_ID,
+        entityType: "company_identity",
+        markdown,
+        append: false,
+      });
+    } catch {
+      // Plan UI still works from localStorage if KB write fails.
+    }
 
     return { plan, carousels, hypotheses, markdown };
   },

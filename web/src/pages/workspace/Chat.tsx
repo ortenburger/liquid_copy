@@ -76,8 +76,7 @@ export function ChatPage() {
 
       <p className="page-lead">
         Main workspace. Grounded in RAG, KB markdown, and agent tools — ask
-        here, review the <Link to="/app/testing-plan">Plan</Link>, or publish
-        from <Link to="/app/test">Test</Link>.
+        here, or review the <Link to="/app/testing-plan">Plan</Link>.
       </p>
 
       {error ? <p className="error-banner">{error}</p> : null}

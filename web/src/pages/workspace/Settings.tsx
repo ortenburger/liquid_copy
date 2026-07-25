@@ -213,7 +213,7 @@ export function SettingsPage() {
             navigate("/app", { replace: true });
           }}
           label="Simple UI"
-          description="Reduce navigation to Chat, Plan, Insights, Test, and Settings."
+          description="Reduce navigation to Chat, Plan, Insights, and Settings."
         />
       </section>
 
@@ -383,14 +383,14 @@ export function SettingsPage() {
           >
             {zernioSimBusy ? "Simulating…" : "Simulate Zernio"}
           </Button>
-          <Link to="/app/test" className="panel-meta">
-            Open Test queue →
+          <Link to="/app/testing-plan" className="panel-meta">
+            Open Plan →
           </Link>
         </div>
         {zernioSimOut ? (
           <p className="info-banner" style={{ marginTop: "var(--space-sm)" }}>
             {zernioSimOut}{" "}
-            <Link to="/app/analytics">Open Analytics →</Link>
+            <Link to="/app/insights">Open Insights →</Link>
           </p>
         ) : null}
       </section>
