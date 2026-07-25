@@ -1,12 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { CarouselCardGrid } from "../../components/open-carousel/CarouselCardGrid";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Progress } from "../../components/ui/Progress";
-import { CarouselCardGrid } from "../../components/open-carousel/CarouselCardGrid";
-import { ParsedOutput } from "../../components/workspace/ParsedOutput";
-import { WorkflowStagesPanel } from "../../components/workspace/WorkflowStagesPanel";
-import { DEMO_QUEUED_CAROUSELS } from "../../data/demo";
 import { api } from "../../lib/api";
 import {
   useAsyncAction,
@@ -15,12 +12,14 @@ import {
   useWorkflowStatus,
 } from "../../lib/hooks";
 import {
-  fetchOpenCarousels,
   openCarouselEditorUrl,
   type OpenCarouselItem,
 } from "../../lib/open-carousel";
 import { loadSettings } from "../../lib/settings";
-import type { HypothesisCard, RoadmapSummary } from "../../lib/types";
+import type {
+  HypothesisCard,
+  WeekPostingPlan,
+} from "../../lib/types";
 import "./workspace.css";
 
 function statusTone(status: HypothesisCard["status"]) {
@@ -31,20 +30,39 @@ function statusTone(status: HypothesisCard["status"]) {
   return "idle" as const;
 }
 
+function statusLabel(status: HypothesisCard["status"]) {
+  if (status === "draft_review") return "ready to review";
+  if (status === "active") return "ready to test";
+  return status.replace(/_/g, " ");
+}
+
+function formatSlotWhen(iso: string) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 export function TestingPlanPage() {
   const { simulation } = useDataMode();
   const workflowStatus = useWorkflowStatus();
   const liveError = useLiveStatusError();
   const { busy, error: actionError, run, clearError } = useAsyncAction();
-  const [roadmap, setRoadmap] = useState<RoadmapSummary | null>(null);
-  const [roadmapText, setRoadmapText] = useState<string | null>(null);
   const [hypotheses, setHypotheses] = useState<HypothesisCard[]>([]);
+  const [weekPlan, setWeekPlan] = useState<WeekPostingPlan | null>(null);
+  const [planCarousels, setPlanCarousels] = useState<OpenCarouselItem[]>([]);
+  const [planMarkdown, setPlanMarkdown] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [kickMsg, setKickMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [progressLabel, setProgressLabel] = useState("Updating testing plan");
   const [reloadKey, setReloadKey] = useState(0);
-  const [queued, setQueued] = useState<OpenCarouselItem[]>([]);
-  const [queueMsg, setQueueMsg] = useState<string | null>(null);
-  const [queueBusy, setQueueBusy] = useState(false);
 
   const reload = useCallback(() => {
     setReloadKey((k) => k + 1);
@@ -52,20 +70,25 @@ export function TestingPlanPage() {
 
   useEffect(() => {
     let cancelled = false;
-    void api
-      .getTestingPlan()
-      .then((plan) => {
+    void (async () => {
+      try {
+        const [plan, central] = await Promise.all([
+          api.getTestingPlan(),
+          api.getCentralPlanDocument(),
+        ]);
         if (cancelled) return;
-        setRoadmap(plan.roadmap);
-        setRoadmapText(plan.roadmapText);
         setHypotheses(plan.hypotheses);
+        setWeekPlan(central.plan);
+        setPlanCarousels(central.carousels);
+        setPlanMarkdown(central.markdown);
         setError(null);
-      })
-      .catch((e) => {
+      } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : String(e));
         }
-      });
+      }
+    })();
+
     return () => {
       cancelled = true;
     };
@@ -73,215 +96,162 @@ export function TestingPlanPage() {
     simulation,
     reloadKey,
     workflowStatus.currentStage,
-    // Re-load plan when stage statuses change (e.g. after Run / kickstart).
     workflowStatus.stages.map((s) => `${s.stage}:${s.status}`).join("|"),
   ]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadQueue() {
-      setQueueBusy(true);
-      if (simulation) {
-        if (!cancelled) {
-          setQueued(DEMO_QUEUED_CAROUSELS);
-          setQueueMsg("Simulation · demo Open Carrusel queue");
-          setQueueBusy(false);
-        }
-        return;
-      }
-      const baseUrl = loadSettings().openCarouselBaseUrl;
-      const result = await fetchOpenCarousels(baseUrl);
-      if (cancelled) return;
-      setQueued(
-        result.carousels.map((c) => ({
-          ...c,
-          status: c.status ?? "queued",
-        })),
-      );
-      setQueueMsg(result.message);
-      setQueueBusy(false);
-    }
-    void loadQueue();
-    return () => {
-      cancelled = true;
-    };
-  }, [simulation, reloadKey]);
+  const carouselById = useMemo(() => {
+    const map = new Map<string, OpenCarouselItem>();
+    for (const c of planCarousels) map.set(c.id, c);
+    return map;
+  }, [planCarousels]);
 
-  function openCarousel(item: OpenCarouselItem) {
-    const baseUrl = loadSettings().openCarouselBaseUrl;
-    if (item.id.startsWith("demo-")) {
-      window.open(
-        baseUrl.replace(/\/$/, "") || "http://localhost:3000",
-        "_blank",
-        "noopener,noreferrer",
+  async function onBuildWeekPlan() {
+    clearError();
+    setMsg(null);
+    setProgressLabel("Building week plan");
+    await run(async () => {
+      const result = await api.generateWeekPostingPlan({
+        onProgress: (m) => setProgressLabel(m),
+      });
+      setHypotheses(result.hypotheses);
+      setWeekPlan(result.plan);
+      setPlanCarousels(result.carousels);
+      setPlanMarkdown(result.markdown);
+      setMsg(
+        `Week plan ready — ${result.plan.slots.length} carousel${result.plan.slots.length === 1 ? "" : "s"} saved to testing-plan.md.`,
       );
-      return;
-    }
-    window.open(
-      openCarouselEditorUrl(baseUrl, item.id),
-      "_blank",
-      "noopener,noreferrer",
-    );
+      setProgressLabel("Updating testing plan");
+    });
   }
 
-  async function onKickstart() {
+  async function onKickstartHypotheses() {
     clearError();
-    setKickMsg(null);
+    setMsg(null);
+    setProgressLabel("Loading hypotheses");
     await run(async () => {
       await api.kickstartPlan();
-      setKickMsg(
+      setMsg(
         simulation
-          ? "Plan regenerated — roadmap and hypotheses ready. Ask Chat to review or approve."
-          : "Workflow started — ask Chat when stages need approval.",
+          ? "Hypotheses refreshed from demo plan."
+          : "Workflow started — hypotheses will appear as stages complete.",
       );
       reload();
     });
   }
 
-  const hasPlan = Boolean(roadmap || roadmapText || hypotheses.length > 0);
+  async function onQueueAllToZernio() {
+    clearError();
+    setMsg(null);
+    setProgressLabel("Queuing carousels to Zernio");
+    await run(async () => {
+      const result = await api.queueWeekPlanToZernio({
+        onProgress: (m) => setProgressLabel(m),
+      });
+      setPlanCarousels(result.carousels);
+      setMsg(result.message);
+      if (!result.ok) {
+        setError(
+          `${result.failed} carousel${result.failed === 1 ? "" : "s"} failed — check Settings / Zernio key, or retry.`,
+        );
+      }
+      setProgressLabel("Updating testing plan");
+    });
+  }
+
+  function openStudio(carousel: OpenCarouselItem) {
+    if (simulation || carousel.id.startsWith("demo-oc-")) {
+      setMsg(`Demo carousel “${carousel.name}” — switch to Live + Open Carrusel to edit.`);
+      return;
+    }
+    const url = openCarouselEditorUrl(
+      loadSettings().openCarouselBaseUrl,
+      carousel.id,
+    );
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+
+  const hasHypotheses = hypotheses.length > 0;
+  const hasWeekSlots = Boolean(weekPlan && weekPlan.slots.length > 0);
+  const pendingZernioCount = planCarousels.filter(
+    (c) => c.status !== "published" && c.status !== "publishing",
+  ).length;
   const displayError = error ?? actionError ?? liveError;
-  const processing = workflowStatus.stages.some(
-    (s) => s.status === "in_progress" || s.status === "awaiting_approval",
-  );
 
   return (
     <div className="page stagger-in">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Experiment design</p>
-          <h1 className="page-title">Testing plan</h1>
+          <p className="eyebrow">One week of tests</p>
+          <h1 className="page-title">Plan</h1>
         </div>
         <div className="mode-toggle">
-          {!simulation ? (
-            <>
-              <Button
-                variant="primary"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await api.runWorkflow();
-                    reload();
-                  })
-                }
-              >
-                Run workflow
-              </Button>
-              <Button
-                variant={
-                  workflowStatus.mode === "Full_Auto_Mode" ? "accent" : "ghost"
-                }
-                disabled={busy}
-                onClick={() => run(() => api.setMode("Full_Auto_Mode"))}
-              >
-                Full auto
-              </Button>
-            </>
-          ) : null}
+          <Badge tone={simulation ? "processing" : "active"}>
+            {simulation ? "Simulation" : "Live"}
+          </Badge>
           <Button
             variant="accent"
-            disabled={busy}
-            onClick={() => void onKickstart()}
+            disabled={busy || !hasHypotheses}
+            onClick={() => void onBuildWeekPlan()}
           >
-            {hasPlan ? "Regenerate plan" : "Generate plan"}
+            {hasWeekSlots ? "Rebuild week plan" : "Plan this week"}
           </Button>
-        </div>
-      </header>
-
-      <p className="page-lead">
-        Kickstart a roadmap and hypotheses here — or ask{" "}
-        <Link to="/app">Chat</Link> to generate and approve stages. Workflow
-        progress below mirrors the full Overview stage rail.
-      </p>
-
-      <Progress
-        active={busy || processing}
-        label="Agents advancing the experiment loop"
-      />
-
-      <WorkflowStagesPanel status={workflowStatus} />
-
-      <section className="panel">
-        <div className="panel-head">
-          <h2 className="panel-title">Kickstart</h2>
-          <Badge tone={simulation ? "processing" : "active"}>
-            {simulation ? "Simulation" : "Real"}
-          </Badge>
-        </div>
-        <p className="page-lead" style={{ marginBottom: "var(--space-md)" }}>
-          {simulation
-            ? "Reset the demo roadmap and hypothesis set for review."
-            : "Run the agent pipeline to produce a testing plan from your knowledge base. Configure Firecrawl / LLM under Settings first."}
-        </p>
-        <div className="list-row-actions">
           <Button
-            variant="primary"
+            variant="ghost"
             disabled={busy}
-            onClick={() => void onKickstart()}
+            onClick={() => void onKickstartHypotheses()}
           >
-            {busy ? "Generating…" : "Kickstart plan"}
+            {hasHypotheses ? "Refresh hypotheses" : "Load hypotheses"}
           </Button>
-          {hasPlan ? (
+          {hasHypotheses || planMarkdown || hasWeekSlots ? (
             <Button variant="ghost" disabled={busy} onClick={reload}>
               Refresh
             </Button>
           ) : null}
         </div>
-        <Progress active={busy} label="Generating testing plan" />
-        {kickMsg ? <p className="info-banner">{kickMsg}</p> : null}
-      </section>
+      </header>
 
+      <p className="page-lead">
+        One central plan lives as <code>testing-plan.md</code> in the knowledge
+        base. Building the week plan rewrites that document, generates a
+        carousel per hypothesis, and lets you queue everything to Zernio.
+      </p>
+
+      <Progress active={busy} label={progressLabel} />
+      {msg ? <p className="info-banner">{msg}</p> : null}
       {displayError ? <p className="error-banner">{displayError}</p> : null}
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">{roadmap?.title ?? "Roadmap"}</h2>
-          <span className="panel-meta">
-            {roadmap ? `${roadmap.weeks.length} weeks` : "plan"}
-          </span>
+          <h2 className="panel-title">Central plan document</h2>
+          <span className="panel-meta">testing-plan.md</span>
         </div>
-        {roadmap ? (
-          <>
-            <p className="page-lead" style={{ marginBottom: "var(--space-md)" }}>
-              {roadmap.summary}
-            </p>
-            <ul className="stage-rail">
-              {roadmap.weeks.map((w) => (
-                <li key={w.week} className="stage-item">
-                  <div className="stage-top">
-                    <span className="stage-name">
-                      Week {w.week} · {w.theme}
-                    </span>
-                  </div>
-                  <p className="list-row-body">{w.objective}</p>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : roadmapText ? (
-          <ParsedOutput raw={roadmapText} stage="RoadmapReview" />
+        {planMarkdown ? (
+          <pre className="checkpoint-output" style={{ maxHeight: 320 }}>
+            {planMarkdown}
+          </pre>
         ) : (
           <p className="empty-state">
-            No roadmap yet. Press <strong>Kickstart plan</strong> to generate
-            one
-            {!simulation ? (
-              <>
-                , or ask <Link to="/app">Chat</Link> after the workflow advances
-              </>
-            ) : null}
-            .
+            No <code>testing-plan.md</code> yet. Load hypotheses, then{" "}
+            <strong>Plan this week</strong> to create it.
           </p>
         )}
       </section>
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Hypotheses</h2>
-          <span className="panel-meta">{hypotheses.length} active</span>
+          <h2 className="panel-title">Hypotheses to test</h2>
+          <span className="panel-meta">{hypotheses.length} total</span>
         </div>
         {hypotheses.length === 0 ? (
           <p className="empty-state">
-            No hypotheses yet. Kickstart a plan, then approve the roadmap via{" "}
-            <Link to="/app">Chat</Link>.
+            No hypotheses yet. Press <strong>Load hypotheses</strong>
+            {!simulation ? (
+              <>
+                {" "}
+                or ask <Link to="/app">Chat</Link> after the workflow advances
+              </>
+            ) : null}
+            .
           </p>
         ) : (
           <ul className="list-stack">
@@ -290,7 +260,9 @@ export function TestingPlanPage() {
                 <div className="list-row-main">
                   <div className="list-row-title">
                     <span>{h.title ?? h.hook}</span>
-                    <Badge tone={statusTone(h.status)}>{h.status}</Badge>
+                    <Badge tone={statusTone(h.status)}>
+                      {statusLabel(h.status)}
+                    </Badge>
                     <Badge tone="idle">{h.platform}</Badge>
                   </div>
                   {h.title ? (
@@ -310,26 +282,77 @@ export function TestingPlanPage() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Queued carousels</h2>
+          <h2 className="panel-title">This week&apos;s posting plan</h2>
           <span className="panel-meta">
-            {queueBusy ? "loading…" : `${queued.length} in queue`}
+            {hasWeekSlots
+              ? `${weekPlan!.slots.length} post${weekPlan!.slots.length === 1 ? "" : "s"}`
+              : "not built"}
           </span>
         </div>
-        <p className="page-lead" style={{ marginBottom: "var(--space-md)" }}>
-          Open Carrusel decks ready to ship. Same slide preview cards as the
-          studio — click to open in Open Carrusel.
-        </p>
-        {queueMsg ? <p className="panel-meta">{queueMsg}</p> : null}
-        <Progress active={queueBusy} label="Loading Open Carrusel queue" />
-        <CarouselCardGrid
-          carousels={queued}
-          onOpen={openCarousel}
-          emptyLabel={
-            simulation
-              ? "No queued carousels in the demo set."
-              : "No carousels in Open Carrusel yet. Kickstart the plan or create decks in the studio."
-          }
-        />
+        {hasWeekSlots && weekPlan ? (
+          <>
+            <p className="page-lead" style={{ marginBottom: "var(--space-md)" }}>
+              {weekPlan.summary}
+            </p>
+            <div className="list-row-actions" style={{ marginBottom: "var(--space-md)" }}>
+              <Button
+                variant="accent"
+                disabled={busy || pendingZernioCount === 0}
+                onClick={() => void onQueueAllToZernio()}
+              >
+                {busy && progressLabel.toLowerCase().includes("zernio")
+                  ? "Queuing…"
+                  : pendingZernioCount === 0
+                    ? "All queued in Zernio"
+                    : simulation
+                      ? `Simulate all in Zernio (${pendingZernioCount})`
+                      : `Queue all in Zernio (${pendingZernioCount})`}
+              </Button>
+            </div>
+            <ol className="posting-plan" aria-label="Week posting plan">
+              {weekPlan.slots.map((slot) => {
+                const carousel = carouselById.get(slot.carouselId);
+                return (
+                  <li key={slot.id} className="posting-plan-slot">
+                    <div className="posting-plan-slot-head">
+                      <div className="list-row-title">
+                        <Badge tone="processing">{slot.dayLabel}</Badge>
+                        <span>{slot.hypothesisTitle}</span>
+                        <Badge tone="idle">{slot.platform}</Badge>
+                      </div>
+                      <p className="list-row-body">
+                        {formatSlotWhen(slot.scheduledAt)} · {slot.hook}
+                      </p>
+                    </div>
+                    {carousel ? (
+                      <CarouselCardGrid
+                        carousels={[carousel]}
+                        onOpen={openStudio}
+                        emptyLabel="Carousel missing — rebuild the week plan."
+                      />
+                    ) : (
+                      <p className="empty-state">
+                        Carousel missing for this hypothesis. Rebuild the week
+                        plan.
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </>
+        ) : (
+          <p className="empty-state">
+            {hasHypotheses ? (
+              <>
+                Press <strong>Plan this week</strong> to schedule hypotheses and
+                generate one carousel each.
+              </>
+            ) : (
+              <>Load hypotheses first, then build the week plan.</>
+            )}
+          </p>
+        )}
       </section>
     </div>
   );

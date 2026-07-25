@@ -10,14 +10,28 @@ import type {
 import { DEMO_QUEUED_CAROUSELS } from "../data/demo";
 import { demoStore } from "./demo-store";
 import { completeWithSettings } from "./llm-browser";
-import { draftCarouselBriefs } from "./carousel-brief";
-import { upsertQueuedCarousel } from "./carousel-queue-store";
+import { briefsFromIdea, draftCarouselBriefs } from "./carousel-brief";
+import {
+  findQueuedByHypothesisId,
+  listQueuedCarousels,
+  patchQueuedCarousel,
+  upsertQueuedCarousel,
+} from "./carousel-queue-store";
 import {
   buildDemoQueuedCarousel,
   queueOpenCarousel,
   type OpenCarouselItem,
   type QueueOpenCarouselOptions,
 } from "./open-carousel";
+import {
+  CENTRAL_PLAN_ENTITY_ID,
+  formatCentralPlanMarkdown,
+  parseCentralPlanMarkdown,
+} from "./central-plan";
+import {
+  loadWeekPostingPlan,
+  saveWeekPostingPlan,
+} from "./posting-plan-store";
 import {
   getApiBaseUrl,
   isDemoWorkspace,
@@ -43,15 +57,44 @@ import type {
   OrgGoal,
   OrgProfile,
   PlanChangeRecord,
+  PostingPlanSlot,
   RAGPassage,
   RetrievalScope,
   RoadmapSummary,
   SocialPlatform,
   StageRecord,
+  WeekPostingPlan,
   WorkflowStage,
   WorkflowStatus,
 } from "./types";
 import { CHECKPOINT_STAGES, WORKFLOW_STAGES } from "./types";
+
+const WEEKDAY_LABELS = [
+  "Mon",
+  "Tue",
+  "Wed",
+  "Thu",
+  "Fri",
+  "Sat",
+  "Sun",
+] as const;
+
+function startOfWeekMonday(d = new Date()): Date {
+  const date = new Date(d);
+  date.setHours(10, 0, 0, 0);
+  const day = date.getDay(); // 0 Sun … 6 Sat
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return date;
+}
+
+function aspectForPlatform(
+  platform: SocialPlatform,
+): "1:1" | "4:5" | "9:16" {
+  if (platform === "tiktok" || platform === "youtube_shorts") return "9:16";
+  if (platform === "instagram") return "4:5";
+  return "4:5";
+}
 
 export type {
   AgentChatResult,
@@ -1669,6 +1712,8 @@ Answer:`;
       tone: input.tone,
       cta: input.cta,
       slides,
+      hypothesisId: input.hypothesisId,
+      scheduledAt: input.scheduledAt,
     };
 
     let item: OpenCarouselItem;
@@ -1680,6 +1725,231 @@ Answer:`;
     }
     upsertQueuedCarousel(item);
     return item;
+  },
+
+  /**
+   * Minimal week workflow (separate from full kickstart):
+   * take current hypotheses → one-week posting schedule → carousel per hyp.
+   */
+  async generateWeekPostingPlan(options?: {
+    onProgress?: (msg: string) => void;
+  }): Promise<{
+    plan: WeekPostingPlan;
+    carousels: OpenCarouselItem[];
+    hypotheses: HypothesisCard[];
+    markdown: string;
+  }> {
+    const { hypotheses } = await this.getTestingPlan();
+    if (hypotheses.length === 0) {
+      throw new Error(
+        "No hypotheses yet. Generate a plan first, or add hypotheses via Chat.",
+      );
+    }
+
+    const testable = hypotheses.filter(
+      (h) => h.status !== "won" && h.status !== "failed",
+    );
+    const selected = (testable.length > 0 ? testable : hypotheses).slice(0, 7);
+    const weekStart = startOfWeekMonday();
+    const slots: PostingPlanSlot[] = [];
+    const carousels: OpenCarouselItem[] = [];
+
+    for (let i = 0; i < selected.length; i++) {
+      const hyp = selected[i]!;
+      const dayIndex = i; // one post per weekday, up to 7
+      const scheduled = new Date(weekStart);
+      scheduled.setDate(weekStart.getDate() + dayIndex);
+      const scheduledAt = scheduled.toISOString();
+      const dayLabel = WEEKDAY_LABELS[dayIndex] ?? `Day ${dayIndex + 1}`;
+      options?.onProgress?.(
+        `Carousel ${i + 1}/${selected.length}: ${hyp.title ?? hyp.hook}`,
+      );
+
+      let carousel = findQueuedByHypothesisId(hyp.id);
+      if (!carousel) {
+        const idea = [hyp.hook, hyp.angle].filter(Boolean).join(" — ");
+        const name = hyp.title?.trim() || hyp.hook.slice(0, 64);
+        const slides = briefsFromIdea(idea, name, { platform: hyp.platform });
+        carousel = await this.queueCarouselFromIdea({
+          idea,
+          name,
+          platform: hyp.platform,
+          aspectRatio: aspectForPlatform(hyp.platform),
+          slides,
+          hypothesisId: hyp.id,
+          scheduledAt,
+        });
+      } else if (carousel.scheduledAt !== scheduledAt) {
+        carousel = { ...carousel, scheduledAt };
+        upsertQueuedCarousel(carousel);
+      }
+
+      carousels.push(carousel);
+      slots.push({
+        id: `slot-${hyp.id}`,
+        hypothesisId: hyp.id,
+        dayIndex,
+        dayLabel,
+        scheduledAt,
+        platform: hyp.platform,
+        hypothesisTitle: hyp.title ?? hyp.hook,
+        hook: hyp.hook,
+        carouselId: carousel.id,
+      });
+    }
+
+    const plan: WeekPostingPlan = {
+      weekStart: weekStart.toISOString(),
+      summary: `${slots.length} hypothesis test${slots.length === 1 ? "" : "s"} scheduled this week — one carousel each.`,
+      slots,
+      createdAt: new Date().toISOString(),
+    };
+    saveWeekPostingPlan(plan);
+
+    options?.onProgress?.("Saving central plan document (testing-plan.md)…");
+    const markdown = formatCentralPlanMarkdown({
+      plan,
+      hypotheses,
+      carousels,
+    });
+    await this.saveToRag({
+      entityId: CENTRAL_PLAN_ENTITY_ID,
+      entityType: "company_identity",
+      markdown,
+      append: false,
+    });
+
+    return { plan, carousels, hypotheses, markdown };
+  },
+
+  getWeekPostingPlan(): {
+    plan: WeekPostingPlan | null;
+    carousels: OpenCarouselItem[];
+  } {
+    const plan = loadWeekPostingPlan();
+    if (!plan) return { plan: null, carousels: [] };
+    const byId = new Map(listQueuedCarousels().map((c) => [c.id, c]));
+    const carousels = plan.slots
+      .map((s) => byId.get(s.carouselId))
+      .filter((c): c is OpenCarouselItem => Boolean(c));
+    return { plan, carousels };
+  },
+
+  /** Load the one central plan markdown (+ structured week plan when present). */
+  async getCentralPlanDocument(): Promise<{
+    entityId: string;
+    markdown: string | null;
+    plan: WeekPostingPlan | null;
+    carousels: OpenCarouselItem[];
+  }> {
+    const doc = await this.getKBEntity(CENTRAL_PLAN_ENTITY_ID);
+    const markdown =
+      doc.found && doc.markdown?.trim() ? doc.markdown.trim() : null;
+    const fromMd = markdown ? parseCentralPlanMarkdown(markdown) : null;
+    const cached = loadWeekPostingPlan();
+    const plan = fromMd ?? cached;
+    if (plan) saveWeekPostingPlan(plan);
+    const byId = new Map(listQueuedCarousels().map((c) => [c.id, c]));
+    const carousels = plan
+      ? plan.slots
+          .map((s) => byId.get(s.carouselId))
+          .filter((c): c is OpenCarouselItem => Boolean(c))
+      : [];
+    return {
+      entityId: CENTRAL_PLAN_ENTITY_ID,
+      markdown,
+      plan,
+      carousels,
+    };
+  },
+
+  /**
+   * Queue every carousel in the current week plan to Zernio (one after another).
+   * Simulation / missing key → simulated publishes. Skips already published.
+   */
+  async queueWeekPlanToZernio(options?: {
+    simulate?: boolean;
+    onProgress?: (msg: string) => void;
+  }): Promise<{
+    ok: boolean;
+    queued: number;
+    skipped: number;
+    failed: number;
+    carousels: OpenCarouselItem[];
+    message: string;
+  }> {
+    const { plan, carousels } = this.getWeekPostingPlan();
+    if (!plan || carousels.length === 0) {
+      throw new Error("No week plan carousels to queue. Build the week plan first.");
+    }
+
+    const forceSimulate = options?.simulate === true || !useLive();
+    let queued = 0;
+    let skipped = 0;
+    let failed = 0;
+    const updated: OpenCarouselItem[] = [];
+
+    for (let i = 0; i < carousels.length; i++) {
+      const carousel = carousels[i]!;
+      if (carousel.status === "published") {
+        skipped += 1;
+        updated.push(carousel);
+        continue;
+      }
+
+      options?.onProgress?.(
+        `Queuing ${i + 1}/${carousels.length} to Zernio: ${carousel.name}`,
+      );
+      patchQueuedCarousel(carousel.id, { status: "publishing" });
+
+      try {
+        const result = await this.publishCarouselToZernio(carousel, {
+          simulate: forceSimulate,
+        });
+        const status = !result.ok
+          ? ("failed" as const)
+          : result.mode === "draft"
+            ? ("draft" as const)
+            : ("published" as const);
+        const patch = {
+          status,
+          postVariantId: result.postVariantId,
+          publishedAt: result.publishedAt,
+          publishMessage: result.message,
+        };
+        patchQueuedCarousel(carousel.id, patch);
+        updated.push({ ...carousel, ...patch });
+        if (result.ok) queued += 1;
+        else failed += 1;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const patch = {
+          status: "failed" as const,
+          publishMessage: message,
+        };
+        patchQueuedCarousel(carousel.id, patch);
+        updated.push({ ...carousel, ...patch });
+        failed += 1;
+      }
+    }
+
+    const modeLabel = forceSimulate ? "simulated in Zernio" : "queued in Zernio";
+    const message = [
+      `${queued} ${modeLabel}`,
+      skipped ? `${skipped} already published` : null,
+      failed ? `${failed} failed` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return {
+      ok: failed === 0,
+      queued,
+      skipped,
+      failed,
+      carousels: updated,
+      message,
+    };
   },
 
   /**

@@ -277,7 +277,7 @@ export function createLiquidCopyTools(deps: LiquidCopyToolDeps) {
 
     query_testing_plan: tool({
       description:
-        "Query/read the current testing plan (roadmap weeks + hypotheses). Use when the user asks what the plan is, to show hypotheses, or before updating.",
+        "Query/read the current testing plan (roadmap weeks + hypotheses). The canonical document is the KB markdown entity testing-plan (testing-plan.md). Use when the user asks what the plan is, to show hypotheses, or before updating.",
       inputSchema: z.object({
         section: z
           .enum(["all", "roadmap", "hypotheses"])

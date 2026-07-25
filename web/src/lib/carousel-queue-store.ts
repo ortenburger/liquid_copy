@@ -35,3 +35,9 @@ export function patchQueuedCarousel(
   write(next);
   return next;
 }
+
+export function findQueuedByHypothesisId(
+  hypothesisId: string,
+): OpenCarouselItem | undefined {
+  return read().find((c) => c.hypothesisId === hypothesisId);
+}

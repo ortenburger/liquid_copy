@@ -151,6 +151,27 @@ export interface HypothesisCard {
   title?: string;
 }
 
+/** One post slot in the minimal one-week plan (hypothesis → carousel). */
+export interface PostingPlanSlot {
+  id: string;
+  hypothesisId: string;
+  dayIndex: number;
+  dayLabel: string;
+  scheduledAt: string;
+  platform: SocialPlatform;
+  hypothesisTitle: string;
+  hook: string;
+  carouselId: string;
+}
+
+/** Minimal week plan built from current hypotheses (separate from full kickstart). */
+export interface WeekPostingPlan {
+  weekStart: string;
+  summary: string;
+  slots: PostingPlanSlot[];
+  createdAt: string;
+}
+
 /** Simple UI — Overview history */
 export interface PlanChangeRecord {
   id: string;
@@ -175,6 +196,8 @@ export interface AnalyticsRow {
   id: string;
   title: string;
   hook: string;
+  /** Creative angle behind the hook (when known). */
+  angle?: string;
   platform: SocialPlatform;
   status: ExperimentCard["status"];
   impressions: number;

@@ -28,6 +28,7 @@ export const DEMO_QUEUED_CAROUSELS: OpenCarouselItem[] = [
     aspectRatio: "9:16",
     slideCount: 3,
     status: "queued",
+    hypothesisId: "hyp-03",
     updatedAt: "2026-07-24T14:00:00.000Z",
     caption: "AI won't replace your brand voice.",
     slides: [
@@ -66,6 +67,7 @@ export const DEMO_QUEUED_CAROUSELS: OpenCarouselItem[] = [
     aspectRatio: "4:5",
     slideCount: 3,
     status: "queued",
+    hypothesisId: "hyp-02",
     updatedAt: "2026-07-23T11:30:00.000Z",
     caption: "3 slides. One metric that moved.",
     slides: [
@@ -97,6 +99,7 @@ export const DEMO_ANALYTICS_ROWS: AnalyticsRow[] = [
     id: "exp-04",
     title: "Dream-outcome teaser",
     hook: "From guesswork to a learning loop.",
+    angle: "Dream outcome + system metaphor.",
     platform: "threads",
     status: "won",
     impressions: 18420,
@@ -112,6 +115,7 @@ export const DEMO_ANALYTICS_ROWS: AnalyticsRow[] = [
     id: "exp-02",
     title: "Carousel proof stack",
     hook: "3 slides. One metric that moved.",
+    angle: "Lead with proof, not brand story.",
     platform: "instagram",
     status: "published",
     impressions: 12110,
@@ -126,6 +130,7 @@ export const DEMO_ANALYTICS_ROWS: AnalyticsRow[] = [
     id: "exp-01",
     title: "Founder-led pain hook",
     hook: "Still drowning in content calendars?",
+    angle: "Name a concrete weekly friction for Series A growth leads.",
     platform: "linkedin",
     status: "measuring",
     impressions: 9400,
@@ -140,6 +145,7 @@ export const DEMO_ANALYTICS_ROWS: AnalyticsRow[] = [
     id: "exp-06",
     title: "Failed pattern revisit",
     hook: "Generic urgency CTAs underperformed.",
+    angle: "Scare-urgency without a concrete pain.",
     platform: "facebook",
     status: "failed",
     impressions: 6200,
@@ -162,6 +168,12 @@ export const DEMO_ANALYTICS: AnalyticsSummary = {
 };
 
 export const DEMO_KB_ENTITIES: KBEntitySummary[] = [
+  {
+    entityId: "testing-plan",
+    entityType: "company_identity",
+    latestVersion: 1,
+    updatedAt: "2026-07-25T12:00:00.000Z",
+  },
   {
     entityId: "liquid-copy",
     entityType: "company_identity",
@@ -195,6 +207,55 @@ export const DEMO_KB_ENTITIES: KBEntitySummary[] = [
 ];
 
 export const DEMO_KB_MARKDOWN: Record<string, string> = {
+  "testing-plan": `# Testing plan
+
+> Central plan document. Build the week plan from the Plan tab to refresh this file.
+
+## Summary
+
+Demo seed — press **Plan this week** to generate carousels and rewrite this document.
+
+## Hypotheses
+
+### hyp-01 — Operational pain beats lifestyle
+- **Hook:** Still drowning in content calendars?
+- **Angle:** Name a concrete weekly friction for Series A growth leads.
+- **Platform:** linkedin
+- **Status:** measuring
+
+### hyp-02 — One-metric carousel
+- **Hook:** 3 slides. One metric that moved.
+- **Angle:** Lead with proof, not brand story.
+- **Platform:** instagram
+- **Status:** published
+
+### hyp-03 — Voice objection flip
+- **Hook:** AI won't replace your brand voice.
+- **Angle:** Reassure creators that Liquid Copy keeps tone grounded.
+- **Platform:** tiktok
+- **Status:** queued
+
+### hyp-04 — Learning-loop teaser
+- **Hook:** From guesswork to a learning loop.
+- **Angle:** Dream outcome + system metaphor.
+- **Platform:** threads
+- **Status:** won
+
+## This week
+
+_No week slots yet. Build the week plan._
+
+## Machine
+
+\`\`\`json
+{
+  "weekStart": "",
+  "summary": "Demo seed — build the week plan to populate slots.",
+  "createdAt": "2026-07-25T12:00:00.000Z",
+  "slots": []
+}
+\`\`\`
+`,
   "liquid-copy": `# Company_Identity
 
 ## Name

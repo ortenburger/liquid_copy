@@ -20,6 +20,10 @@ export interface OpenCarouselItem {
   updatedAt: string;
   /** Present when sourced from the testing-plan queue (demo / publish queue). */
   status?: "queued" | "draft" | "published" | "publishing" | "failed";
+  /** Linked hypothesis when generated from the week posting plan. */
+  hypothesisId?: string;
+  /** Planned post time (ISO) for the week schedule. */
+  scheduledAt?: string;
   /** Set after Publish to Zernio */
   postVariantId?: string;
   publishedAt?: string;
@@ -237,6 +241,8 @@ export interface QueueOpenCarouselOptions {
   tone?: string;
   cta?: string;
   slides?: CarouselSlideBrief[];
+  hypothesisId?: string;
+  scheduledAt?: string;
 }
 
 /**
@@ -324,6 +330,8 @@ export async function queueOpenCarousel(
     caption,
     updatedAt: new Date().toISOString(),
     status: "queued",
+    hypothesisId: options?.hypothesisId,
+    scheduledAt: options?.scheduledAt,
   };
 }
 
@@ -350,5 +358,7 @@ export function buildDemoQueuedCarousel(
     caption: `${name} — ${idea.slice(0, 180)}`,
     updatedAt: new Date().toISOString(),
     status: "queued",
+    hypothesisId: options.hypothesisId,
+    scheduledAt: options.scheduledAt,
   };
 }
