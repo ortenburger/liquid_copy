@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { Markdown } from "../../components/ui/Markdown";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
 import type { AnalyticsSummary } from "../../lib/types";
@@ -88,7 +89,7 @@ export function AnalyticsPage() {
                 {new Date(data.updatedAt).toLocaleString()}
               </span>
             </div>
-            <p className="list-row-body">{data.summary}</p>
+            <Markdown source={data.summary} className="list-row-body" />
             {data.winnerId ? (
               <p className="panel-meta">Winner · {data.winnerId}</p>
             ) : null}
@@ -127,7 +128,7 @@ export function AnalyticsPage() {
                         {row.comments}
                       </p>
                       {row.note ? (
-                        <p className="list-row-body">{row.note}</p>
+                        <Markdown source={row.note} className="list-row-body" />
                       ) : null}
                     </div>
                   </li>

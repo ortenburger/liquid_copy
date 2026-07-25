@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { Markdown } from "../../components/ui/Markdown";
 import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
@@ -155,7 +156,7 @@ export function InsightsPage() {
                 {new Date(data.updatedAt).toLocaleString()}
               </span>
             </div>
-            <p className="list-row-body">{data.summary}</p>
+            <Markdown source={data.summary} className="list-row-body" />
           </section>
 
           <section className="panel">
