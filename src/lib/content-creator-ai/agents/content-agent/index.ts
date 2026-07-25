@@ -169,7 +169,17 @@ export function createOpenCarouselHttpClient(
         method: "POST",
       });
       if (!res.ok) {
-        throw new Error(`OpenCarousel export failed: ${res.status}`);
+        const body = await res.text().catch(() => "");
+        let detail = body.slice(0, 240);
+        try {
+          const parsed = JSON.parse(body) as { error?: string };
+          if (parsed.error) detail = parsed.error;
+        } catch {
+          /* keep raw */
+        }
+        throw new Error(
+          `OpenCarousel export failed: ${res.status}${detail ? ` — ${detail}` : ""}`,
+        );
       }
       return res.arrayBuffer();
     },
@@ -528,8 +538,16 @@ export class ContentAgent {
       slides,
     });
 
-    // Step 5: export PNG ZIP
-    await this.client.exportCarousel(carouselId);
+    // Step 5: export PNG ZIP (best-effort — carousel + slides already saved)
+    try {
+      await this.client.exportCarousel(carouselId);
+    } catch (err) {
+      console.warn(
+        `[content-agent] Open Carrusel export skipped for ${carouselId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
 
     const id = randomUUID();
     const traceability: TraceabilityChain = {
