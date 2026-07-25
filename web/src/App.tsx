@@ -10,6 +10,7 @@ import { CarouselsPage } from "./pages/workspace/Carousels";
 import { TestingPlanPage } from "./pages/workspace/TestingPlan";
 import { InsightsPage } from "./pages/workspace/Insights";
 import { ChatPage } from "./pages/workspace/Chat";
+import { AnalyticsPage } from "./pages/workspace/Analytics";
 import { useSimpleUi } from "./lib/hooks";
 
 function WorkspaceHome() {
@@ -36,10 +37,7 @@ export default function App() {
             path="experiments"
             element={<Navigate to="/app" replace />}
           />
-          <Route
-            path="analytics"
-            element={<Navigate to="/app/insights" replace />}
-          />
+          <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="organization" element={<Navigate to="/app" replace />} />
           <Route path="approvals" element={<Navigate to="/app" replace />} />
         </Route>

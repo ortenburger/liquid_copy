@@ -9,6 +9,7 @@ export interface NavItem {
 export const FULL_NAV: NavItem[] = [
   { to: "/app", end: true, label: "Overview" },
   { to: "/app/checkpoints", label: "Checkpoints" },
+  { to: "/app/analytics", label: "Analytics" },
   { to: "/app/knowledge", label: "Knowledge" },
   { to: "/app/platforms", label: "Platforms" },
   { to: "/app/carousels", label: "Carousels" },
@@ -25,6 +26,7 @@ export const SIMPLE_NAV: NavItem[] = [
 
 export const FULL_ONLY_PREFIXES = [
   "/app/checkpoints",
+  "/app/analytics",
   "/app/knowledge",
   "/app/platforms",
   "/app/carousels",
