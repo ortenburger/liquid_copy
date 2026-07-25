@@ -48,11 +48,82 @@
 
 .chat-bubble-body {
   margin: 0;
-  white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
   font: var(--text-body);
   color: var(--on-surface);
+}
+
+.chat-bubble-body > :first-child {
+  margin-top: 0;
+}
+
+.chat-bubble-body > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-bubble-body p {
+  margin: 0.4em 0;
+}
+
+.chat-bubble-body ul,
+.chat-bubble-body ol {
+  margin: 0.35em 0 0.5em;
+  padding-left: 1.25em;
+}
+
+.chat-bubble-body li {
+  margin: 0.15em 0;
+}
+
+.chat-bubble-body h1,
+.chat-bubble-body h2,
+.chat-bubble-body h3 {
+  margin: 0.85em 0 0.35em;
+  line-height: 1.3;
+  font: var(--text-body-bold);
+  color: var(--on-surface);
+}
+
+.chat-bubble-body h1 {
+  font-size: 1.15em;
+}
+
+.chat-bubble-body h2 {
+  font-size: 1.05em;
+}
+
+.chat-bubble-body h3 {
+  font-size: 1em;
+}
+
+.chat-bubble-body code {
+  font: var(--text-label-mono);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+}
+
+.chat-bubble-body pre {
+  margin: 0.5em 0;
+  padding: 0.65em 0.8em;
+  overflow: auto;
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
+}
+
+.chat-bubble-body pre code {
+  padding: 0;
+  background: none;
+}
+
+.chat-bubble-body a {
+  color: var(--primary, var(--accent));
+  text-underline-offset: 2px;
+}
+
+.chat-bubble-body strong {
+  font-weight: 600;
 }
 
 .chat-composer {

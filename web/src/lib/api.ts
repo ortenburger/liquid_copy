@@ -158,6 +158,70 @@ function roadmapFromSevenDayHyps(hyps: HypothesisCard[]): RoadmapSummary {
   };
 }
 
+function rankAnalyticsRow(row: AnalyticsRow) {
+  return row.engagementRate * 1000 + row.impressions / 1_000_000;
+}
+
+function formatAnalyticsForPrompt(analytics: AnalyticsSummary): string {
+  const ranked = [...analytics.rows].sort(
+    (a, b) => rankAnalyticsRow(b) - rankAnalyticsRow(a),
+  );
+  const top = ranked.filter((r) => r.status !== "failed").slice(0, 8);
+  const low = ranked
+    .filter((r) => r.status === "failed" || r.engagementRate < 0.02)
+    .slice(0, 5);
+
+  const fmt = (r: AnalyticsRow) =>
+    `- hook: ${r.hook}${r.angle ? ` | angle: ${r.angle}` : ""} | ER ${(r.engagementRate * 100).toFixed(1)}% | ${r.impressions} impr | ${r.platform} | ${r.status}${r.winner ? " | WINNER" : ""}${r.note ? ` | note: ${r.note}` : ""}`;
+
+  return [
+    `Summary: ${analytics.summary}`,
+    `Inconclusive: ${analytics.inconclusive ? "yes" : "no"}`,
+    `Updated: ${analytics.updatedAt}`,
+    "",
+    "Top performers:",
+    top.length ? top.map(fmt).join("\n") : "(none yet)",
+    "",
+    "Underperformers / avoid:",
+    low.length ? low.map(fmt).join("\n") : "(none flagged)",
+  ].join("\n");
+}
+
+function fallbackInsightsMarkdown(analytics: AnalyticsSummary): string {
+  const ranked = [...analytics.rows].sort(
+    (a, b) => rankAnalyticsRow(b) - rankAnalyticsRow(a),
+  );
+  const top = ranked.filter((r) => r.status !== "failed").slice(0, 3);
+  const avoid = ranked
+    .filter((r) => r.status === "failed" || r.engagementRate < 0.02)
+    .slice(0, 3);
+  const lines = [
+    `# Insights · week steering`,
+    ``,
+    `Updated: ${new Date().toISOString()}`,
+    ``,
+    `## Readout`,
+    analytics.summary || "No analytics summary yet — steer from brand context.",
+    ``,
+    `## Double down`,
+    ...(top.length
+      ? top.map(
+          (r) =>
+            `- **${r.hook}**${r.angle ? ` — ${r.angle}` : ""} (ER ${(r.engagementRate * 100).toFixed(1)}%)`,
+        )
+      : ["- No winners yet — explore 2–3 distinct hooks grounded in the KB."]),
+    ``,
+    `## Avoid / revisit`,
+    ...(avoid.length
+      ? avoid.map((r) => `- ${r.hook}${r.note ? ` — ${r.note}` : ""}`)
+      : ["- Nothing flagged — still vary angle and platform."]),
+    ``,
+    `## Next-week theme`,
+    `Ship one carousel test per day that extends what worked and drops what stalled.`,
+  ];
+  return lines.join("\n");
+}
+
 export type {
   AgentChatResult,
   AgentToolEvent,
@@ -186,6 +250,7 @@ const SCOPE_TO_ENTITY_TYPE: Record<RetrievalScope, KBEntitySummary["entityType"]
   };
 
 const MAX_MD_CHARS = 10_000;
+const INSIGHTS_LATEST_ENTITY_ID = "insights-latest";
 
 function guessEntityType(entityId: string): KBWriteEntityType {
   const id = entityId.toLowerCase();
@@ -1883,6 +1948,8 @@ Answer:`;
    */
   async generateSevenDayPlan(options?: {
     onProgress?: (msg: string) => void;
+    /** Week-steering insights markdown (injected into hyp prompt). */
+    insightsMarkdown?: string;
   }): Promise<{
     plan: WeekPostingPlan;
     carousels: OpenCarouselItem[];
@@ -1912,19 +1979,26 @@ Answer:`;
         : markdownSources
             .map((m) => `--- ${m.entityId} ---\n${m.markdown.slice(0, 1200)}`)
             .join("\n\n");
+    const insightsBlock = options?.insightsMarkdown?.trim()
+      ? options.insightsMarkdown.trim().slice(0, 3500)
+      : "(No prior insights analysis — invent from RAG/KB only.)";
 
     options?.onProgress?.(
       `Drafting 7 hypotheses with ${llm.provider}/${llm.model}…`,
     );
-    const prompt = `You are Liquid Copy's experimentation planner. Using ONLY the company context below, invent exactly 7 distinct content hypotheses to test over the next 7 days (one per day).
+    const prompt = `You are Liquid Copy's experimentation planner. Using the company context and insights analysis below, invent exactly 7 distinct content hypotheses to test over the next 7 days (one per day).
 
 Return ONLY a JSON array (no prose) of 7 objects:
 [{"title":"short name","hook":"scroll-stopping first line","angle":"why this might win","platform":"linkedin|instagram|tiktok|threads|x"}]
 
 Rules:
 - Hooks must be specific to this company/audience, not generic marketing fluff
+- Double down on what the insights say is working; avoid underperformers
 - Vary platforms when context allows; default linkedin
 - Each hypothesis must be testable in a short carousel
+
+Insights analysis (week steering):
+${insightsBlock}
 
 RAG passages:
 ${passageBlock}
@@ -2446,28 +2520,163 @@ JSON:`;
     return { profile, goal };
   },
 
+  /**
+   * Synthesize analytics (+ optional RAG) into week-steering markdown for RAG + Plan.
+   */
   async generateInsightAnalysis(
-    pieces: InsightPiece[],
-    passages: RAGPassage[],
+    analyticsOrPieces: AnalyticsSummary | InsightPiece[],
+    passages: RAGPassage[] = [],
   ): Promise<string> {
     const llm = loadSettings().llm;
-    const prompt = `Given these content pieces and KB snippets, write 2–3 short bullet insights about what's working. No hype. Reference specific hooks. Max 120 words. Plain bullets only.
+    const isSummary =
+      analyticsOrPieces &&
+      typeof analyticsOrPieces === "object" &&
+      !Array.isArray(analyticsOrPieces) &&
+      "rows" in analyticsOrPieces;
+
+    if (!isSummary) {
+      const pieces = analyticsOrPieces as InsightPiece[];
+      const prompt = `Given these content pieces and KB snippets, write 2–3 short bullet insights about what's working. No hype. Reference specific hooks. Max 120 words. Plain bullets only.
 
 Content: ${JSON.stringify(pieces.slice(0, 5))}
 KB: ${passages
-      .slice(0, 3)
-      .map((p) => p.content)
-      .join("\n")}`;
-    try {
-      return await completeWithSettings(llm, prompt);
-    } catch {
-      const fallback =
-        passages.find((p) => p.scope === "experiment_history") ?? passages[0];
-      if (fallback) {
-        return `• ${fallback.content}`;
+        .slice(0, 3)
+        .map((p) => p.content)
+        .join("\n")}`;
+      try {
+        return await completeWithSettings(llm, prompt);
+      } catch {
+        const fallback =
+          passages.find((p) => p.scope === "experiment_history") ?? passages[0];
+        if (fallback) return `• ${fallback.content}`;
+        throw new Error(
+          "Could not generate analysis — configure LLM in Settings.",
+        );
       }
-      throw new Error("Could not generate analysis — configure LLM in Settings.");
     }
+
+    const analytics = analyticsOrPieces as AnalyticsSummary;
+    const analyticsBlock = formatAnalyticsForPrompt(analytics);
+    const kbBlock =
+      passages.length === 0
+        ? "(No RAG passages.)"
+        : passages
+            .slice(0, 5)
+            .map((p) => `- ${p.sourceDoc}: ${p.content.slice(0, 280)}`)
+            .join("\n");
+
+    const prompt = `You are Liquid Copy's insights analyst. Turn performance data + KB into a week-steering brief for the next 7 days of carousel tests.
+
+Write markdown with these sections exactly:
+# Insights · week steering
+## Readout
+## Double down
+## Avoid / revisit
+## Next-week theme
+
+Rules:
+- Specific hooks/angles from the data — no generic marketing fluff
+- Double down = 3–5 concrete bets; Avoid = what to drop or rewrite
+- Next-week theme = 2–4 sentences that a planner can turn into 7 daily tests
+- Max ~450 words. No code fences.
+
+Analytics:
+${analyticsBlock}
+
+KB snippets:
+${kbBlock}
+
+Markdown:`;
+
+    try {
+      const raw = await completeWithSettings(llm, prompt);
+      const cleaned = raw
+        .replace(/^```(?:markdown|md)?\s*/i, "")
+        .replace(/\s*```$/i, "")
+        .trim();
+      if (cleaned.length > 80) return cleaned;
+    } catch {
+      // fall through
+    }
+    return fallbackInsightsMarkdown(analytics);
+  },
+
+  /**
+   * Insights → RAG (`insights-latest`) → 7-day carousel plan.
+   * Used from Insights and Plan empty/generate CTAs.
+   */
+  async analyzeInsightsAndPlanWeek(options?: {
+    onProgress?: (msg: string) => void;
+  }): Promise<{
+    insightsMarkdown: string;
+    plan: WeekPostingPlan;
+    carousels: OpenCarouselItem[];
+    hypotheses: HypothesisCard[];
+    roadmap: RoadmapSummary;
+    markdown: string;
+  }> {
+    options?.onProgress?.("Loading analytics…");
+    const analytics = await this.getAnalytics();
+
+    options?.onProgress?.("Gathering RAG / KB context…");
+    const { passages } = await this.gatherRagMarkdownContext(
+      "insights hooks angles winners experiment history audience what worked",
+      { limit: 8 },
+    );
+
+    options?.onProgress?.("Synthesizing insights with LLM…");
+    const insightsMarkdown = await this.generateInsightAnalysis(
+      analytics,
+      passages,
+    );
+
+    options?.onProgress?.("Saving insights to RAG (insights-latest)…");
+    try {
+      await this.saveToRag({
+        entityId: INSIGHTS_LATEST_ENTITY_ID,
+        entityType: "experiment",
+        markdown: insightsMarkdown,
+        append: false,
+      });
+    } catch {
+      // Plan still proceeds from injected markdown if KB write fails.
+    }
+
+    if (!useLive()) {
+      options?.onProgress?.("Loading demo plan from insights…");
+      await this.kickstartPlan("insights-driven week");
+      const built = await this.generateWeekPostingPlan({
+        startFrom: "today",
+        onProgress: options?.onProgress,
+      });
+      const roadmap: RoadmapSummary = {
+        title: "Next 7 days",
+        summary:
+          built.plan.summary ||
+          "Insights-driven demo plan — one carousel experiment per day.",
+        weeks: built.hypotheses.map((h, i) => ({
+          week: i + 1,
+          theme: h.title ?? h.hook.slice(0, 48),
+          objective: [h.hook, h.angle].filter(Boolean).join(" — "),
+        })),
+      };
+      saveSevenDayPlanSnapshot({
+        roadmap,
+        hypotheses: built.hypotheses,
+      });
+      return {
+        insightsMarkdown,
+        ...built,
+        roadmap,
+      };
+    }
+
+    options?.onProgress?.("Building 7-day carousel plan from insights…");
+    const built = await this.generateSevenDayPlan({
+      onProgress: options?.onProgress,
+      insightsMarkdown,
+    });
+    return { insightsMarkdown, ...built };
   },
 
   subscribe(listener: () => void): () => void {

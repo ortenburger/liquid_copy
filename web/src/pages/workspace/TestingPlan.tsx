@@ -98,46 +98,21 @@ export function TestingPlanPage() {
     return map;
   }, [carousels]);
 
-  async function onGenerate() {
+  async function onAnalyzeAndPlan() {
     clearError();
     setMsg(null);
     await run(async () => {
-      if (simulation) {
-        setProgressLabel("Loading demo plan…");
-        await api.kickstartPlan();
-        setProgressLabel("Building 7-day carousels…");
-        const result = await api.generateWeekPostingPlan({
-          startFrom: "today",
-          onProgress: setProgressLabel,
-        });
-        setRoadmap({
-          title: "Next 7 days",
-          summary: result.plan.summary,
-          weeks: result.hypotheses.map((h, i) => ({
-            week: i + 1,
-            theme: h.title ?? h.hook.slice(0, 48),
-            objective: [h.hook, h.angle].filter(Boolean).join(" — "),
-          })),
-        });
-        setHypotheses(result.hypotheses);
-        setWeekPlan(result.plan);
-        setCarousels(result.carousels);
-        setMsg(
-          `Demo plan ready — ${result.plan.slots.length} hypotheses + carousels for the next 7 days.`,
-        );
-      } else {
-        setProgressLabel("Generating from RAG + Ollama…");
-        const result = await api.generateSevenDayPlan({
-          onProgress: setProgressLabel,
-        });
-        setRoadmap(result.roadmap);
-        setHypotheses(result.hypotheses);
-        setWeekPlan(result.plan);
-        setCarousels(result.carousels);
-        setMsg(
-          `7-day plan ready — ${result.hypotheses.length} RAG/Ollama hypotheses, one carousel each.`,
-        );
-      }
+      setProgressLabel("Analyzing insights…");
+      const result = await api.analyzeInsightsAndPlanWeek({
+        onProgress: setProgressLabel,
+      });
+      setRoadmap(result.roadmap);
+      setHypotheses(result.hypotheses);
+      setWeekPlan(result.plan);
+      setCarousels(result.carousels);
+      setMsg(
+        `Insights saved to RAG · ${result.plan.slots.length} carousels queued for next week.`,
+      );
       setProgressLabel("Updating plan");
     });
   }
@@ -198,9 +173,9 @@ export function TestingPlanPage() {
           <Button
             variant="accent"
             disabled={busy}
-            onClick={() => void onGenerate()}
+            onClick={() => void onAnalyzeAndPlan()}
           >
-            {hasPlan ? "Regenerate" : "Generate plan"}
+            {hasPlan ? "Re-analyze & plan" : "Analyze insights & plan week"}
           </Button>
           <Button
             variant="primary"
@@ -220,10 +195,10 @@ export function TestingPlanPage() {
       </header>
 
       <p className="page-lead">
-        {simulation
-          ? "Demo mode loads sample hypotheses and carousels for the next 7 days."
-          : "Live mode pulls RAG/KB context, drafts 7 hypotheses with your LLM (Ollama), and builds one carousel per day."}{" "}
-        Ask <Link to="/app">Chat</Link> to refine.
+        Next-week queue from Insights analysis (saved to RAG) plus one carousel
+        per day. Start from{" "}
+        <Link to="/app/insights">Insights</Link> or generate here. Ask{" "}
+        <Link to="/app">Chat</Link> to refine.
       </p>
 
       <Progress active={busy} label={progressLabel} />
@@ -258,10 +233,21 @@ export function TestingPlanPage() {
             </ol>
           </>
         ) : (
-          <p className="empty-state">
-            No roadmap yet. Press <strong>Generate plan</strong>
-            {!simulation ? " (needs KB/RAG + Ollama)" : null}.
-          </p>
+          <div>
+            <p className="empty-state">
+              No roadmap yet. Analyze Insights to draft the next 7 days
+              {!simulation ? " (needs KB/RAG + Ollama)" : null}.
+            </p>
+            <div className="list-row-actions">
+              <Button
+                variant="accent"
+                disabled={busy}
+                onClick={() => void onAnalyzeAndPlan()}
+              >
+                Analyze insights & plan week
+              </Button>
+            </div>
+          </div>
         )}
       </section>
 
@@ -272,7 +258,7 @@ export function TestingPlanPage() {
         </div>
         {hypotheses.length === 0 ? (
           <p className="empty-state">
-            No hypotheses yet. Generate a plan to draft the next 7 days.
+            No hypotheses yet. Analyze insights to draft the next 7 days.
           </p>
         ) : (
           <ul className="list-stack">
@@ -303,11 +289,11 @@ export function TestingPlanPage() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Carousels · next 7 days</h2>
+          <h2 className="panel-title">Next week queue</h2>
           <span className="panel-meta">
             {weekPlan?.slots.length
-              ? `${weekPlan.slots.length} scheduled`
-              : "not built"}
+              ? `${weekPlan.slots.length} carousels scheduled`
+              : "empty"}
           </span>
         </div>
         {weekPlan && weekPlan.slots.length > 0 ? (
@@ -331,7 +317,7 @@ export function TestingPlanPage() {
                     : `Queue all to Zernio (${pendingZernioCount})`}
               </Button>
             </div>
-            <ol className="posting-plan" aria-label="Seven-day carousel plan">
+            <ol className="posting-plan" aria-label="Next week carousel queue">
               {weekPlan.slots.map((slot) => {
                 const carousel = carouselById.get(slot.carouselId);
                 return (
@@ -350,12 +336,11 @@ export function TestingPlanPage() {
                       <CarouselCardGrid
                         carousels={[carousel]}
                         onOpen={openStudio}
-                        emptyLabel="Carousel missing — regenerate the plan."
+                        emptyLabel="Carousel missing — re-analyze to rebuild."
                       />
                     ) : (
                       <p className="empty-state">
-                        Carousel missing for this hypothesis. Regenerate the
-                        plan.
+                        Carousel missing for this hypothesis. Re-analyze & plan.
                       </p>
                     )}
                   </li>
@@ -364,11 +349,25 @@ export function TestingPlanPage() {
             </ol>
           </>
         ) : (
-          <p className="empty-state">
-            Generate a plan to create one carousel per hypothesis for the next 7
-            days
-            {!simulation ? " (Open Carrusel must be running)" : null}.
-          </p>
+          <div>
+            <p className="empty-state">
+              Queue is empty. Analyze Insights to synthesize what&apos;s working,
+              save it to RAG, and build one carousel per day for next week
+              {!simulation ? " (Open Carrusel must be running)" : null}.
+            </p>
+            <div className="list-row-actions">
+              <Button
+                variant="accent"
+                disabled={busy}
+                onClick={() => void onAnalyzeAndPlan()}
+              >
+                Analyze insights & plan week
+              </Button>
+              <Link to="/app/insights" className="btn btn-ghost">
+                Open Insights
+              </Link>
+            </div>
+          </div>
         )}
       </section>
     </div>

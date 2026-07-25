@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
 import type {
@@ -33,6 +34,9 @@ export function InsightsPage() {
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [progressLabel, setProgressLabel] = useState("Analyzing insights");
+  const [msg, setMsg] = useState<string | null>(null);
 
   async function load() {
     setBusy(true);
@@ -67,6 +71,26 @@ export function InsightsPage() {
     void load();
   }, [simulation]);
 
+  async function onAnalyzeAndPlan() {
+    setAnalyzing(true);
+    setError(null);
+    setMsg(null);
+    setProgressLabel("Analyzing insights…");
+    try {
+      const result = await api.analyzeInsightsAndPlanWeek({
+        onProgress: setProgressLabel,
+      });
+      setMsg(
+        `Saved insights to RAG and queued ${result.plan.slots.length} carousels for next week. Open Plan to review.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAnalyzing(false);
+      setProgressLabel("Analyzing insights");
+    }
+  }
+
   const ranked = useMemo(() => {
     if (!data) return [];
     return [...data.rows].sort((a, b) => rankScore(b) - rankScore(a));
@@ -80,6 +104,8 @@ export function InsightsPage() {
     .filter((r) => r.status === "failed" || r.engagementRate < 0.02)
     .slice(0, 3);
 
+  const actionBusy = busy || analyzing;
+
   return (
     <div className="page stagger-in">
       <header className="page-header">
@@ -91,18 +117,32 @@ export function InsightsPage() {
           <Badge tone={simulation ? "processing" : "active"}>
             {simulation ? "Simulation" : "Live"}
           </Badge>
-          <Button variant="ghost" disabled={busy} onClick={() => void load()}>
+          <Button
+            variant="accent"
+            disabled={actionBusy}
+            onClick={() => void onAnalyzeAndPlan()}
+          >
+            Analyze → next week plan
+          </Button>
+          <Button variant="ghost" disabled={actionBusy} onClick={() => void load()}>
             Refresh
           </Button>
         </div>
       </header>
 
       <p className="page-lead">
-        Top-performing hooks and angles from published tests. Use these to
-        steer the next week on{" "}
+        Top-performing hooks and angles from published tests. Analyze to save a
+        week-steering brief to RAG and push a 7-day carousel queue on{" "}
         <Link to="/app/testing-plan">Plan</Link>.
       </p>
 
+      <Progress active={analyzing} label={progressLabel} />
+      {msg ? (
+        <p className="info-banner">
+          {msg}{" "}
+          <Link to="/app/testing-plan">Open Plan →</Link>
+        </p>
+      ) : null}
       {error ? <p className="error-banner">{error}</p> : null}
 
       {data ? (
@@ -125,8 +165,9 @@ export function InsightsPage() {
             </div>
             {topHooks.length === 0 ? (
               <p className="empty-state">
-                No hook performance yet. Queue a week from Plan, publish via
-                Zernio, then refresh.
+                No hook performance yet. You can still analyze — the planner will
+                lean on KB/RAG — or queue a week from Plan, publish via Zernio,
+                then refresh.
               </p>
             ) : (
               <ol className="list-stack insights-rank">
@@ -229,9 +270,24 @@ export function InsightsPage() {
           ) : null}
         </>
       ) : (
-        <p className="empty-state">
-          {busy ? "Loading insights…" : "No performance data yet."}
-        </p>
+        <div className="panel">
+          <p className="empty-state">
+            {busy
+              ? "Loading insights…"
+              : "No performance data yet. Analyze anyway to plan next week from KB/RAG, or publish tests first."}
+          </p>
+          {!busy ? (
+            <div className="list-row-actions">
+              <Button
+                variant="accent"
+                disabled={analyzing}
+                onClick={() => void onAnalyzeAndPlan()}
+              >
+                Analyze → next week plan
+              </Button>
+            </div>
+          ) : null}
+        </div>
       )}
     </div>
   );

@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import Markdown from "react-markdown";
 import { Link } from "react-router-dom";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { TextArea } from "../../components/ui/Input";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { api, type ChatMessage } from "../../lib/api";
+import { loadChatHistory, saveChatHistory } from "../../lib/chat-history-store";
 import { useDataMode } from "../../lib/hooks";
 import { loadSettings } from "../../lib/settings";
 import "./workspace.css";
 import "./Chat.css";
 import "../../components/ui/Input.css";
+
+const MAX_CHAT_MESSAGES = 20;
 
 function uid() {
   return `m-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -19,14 +23,22 @@ function msg(role: ChatMessage["role"], content: string): ChatMessage {
   return { id: uid(), role, content, at: new Date().toISOString() };
 }
 
+function welcomeMessage(): ChatMessage {
+  return msg(
+    "assistant",
+    "I'm the Liquid Copy agent. Ask me to ingest a website into RAG, generate/query/update the testing plan, queue a carousel from an idea, or save notes.",
+  );
+}
+
+function capHistory(list: ChatMessage[]): ChatMessage[] {
+  return list.slice(-MAX_CHAT_MESSAGES);
+}
+
 export function ChatPage() {
   const { simulation } = useDataMode();
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    msg(
-      "assistant",
-      "I'm the Liquid Copy agent. Ask me to ingest a website into RAG, generate/query/update the testing plan, queue a carousel from an idea, or save notes.",
-    ),
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(
+    () => loadChatHistory() ?? [welcomeMessage()],
+  );
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,11 +49,15 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  useEffect(() => {
+    saveChatHistory(messages);
+  }, [messages]);
+
   async function send(text: string) {
     const content = text.trim();
     if (!content || busy) return;
 
-    const nextHistory = [...messages, msg("user", content)];
+    const nextHistory = capHistory([...messages, msg("user", content)]);
     setMessages(nextHistory);
     setInput("");
     setBusy(true);
@@ -49,7 +65,9 @@ export function ChatPage() {
 
     try {
       const result = await api.agentChat(nextHistory);
-      setMessages((prev) => [...prev, msg("assistant", result.reply)]);
+      setMessages((prev) =>
+        capHistory([...prev, msg("assistant", result.reply)]),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -94,7 +112,19 @@ export function ChatPage() {
                   {new Date(m.at).toLocaleTimeString()}
                 </time>
               </header>
-              <pre className="chat-bubble-body">{m.content}</pre>
+              <div className="chat-bubble-body">
+                <Markdown
+                  components={{
+                    a: ({ href, children }) => (
+                      <a href={href} target="_blank" rel="noreferrer">
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {m.content}
+                </Markdown>
+              </div>
             </article>
           ))}
           {busy ? (
@@ -111,7 +141,13 @@ export function ChatPage() {
             label="Message"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask the agent… (ingest https://…, queue a carousel, save to RAG)"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(input);
+              }
+            }}
+            placeholder="Ask the agent… (Enter to send · Shift+Enter for newline)"
             rows={3}
             disabled={busy}
           />
