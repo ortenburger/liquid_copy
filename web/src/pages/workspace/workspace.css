@@ -230,3 +230,10 @@
   font: var(--text-label-mono);
   letter-spacing: 0.02em;
 }
+
+.stage-summary {
+  margin: 4px 0 0;
+  font: var(--text-label-mono);
+  color: var(--on-surface-variant);
+  line-height: 1.4;
+}

@@ -36,6 +36,12 @@ export function OverviewPage() {
   const llm = loadSettings().llm;
   const allPending =
     !simulation && status.stages.every((s) => s.status === "pending");
+  const contentStage = status.stages.find((s) => s.stage === "ContentGeneration");
+  const studioPath =
+    contentStage?.studioPath ??
+    (typeof sessionStorage !== "undefined"
+      ? sessionStorage.getItem("liquid-copy.last-studio-path")
+      : null);
 
   return (
     <div className="page stagger-in">
@@ -46,13 +52,22 @@ export function OverviewPage() {
         </div>
         <div className="mode-toggle" role="group" aria-label="Operating mode">
           {!simulation ? (
-            <Button
-              variant="accent"
-              disabled={busy}
-              onClick={() => run(() => api.runWorkflow())}
-            >
-              Run workflow
-            </Button>
+            <>
+              <Button
+                variant="accent"
+                disabled={busy}
+                onClick={() => run(() => api.runWorkflow())}
+              >
+                Run workflow
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => run(() => api.resetWorkflow())}
+              >
+                Reset
+              </Button>
+            </>
           ) : null}
           <Button
             variant={
@@ -83,8 +98,9 @@ export function OverviewPage() {
       ) : (
         <p className="info-banner">
           <Badge tone="active">Real data</Badge>{" "}
-          Workspace calls the Liquid Copy API. Configure Firecrawl and models under{" "}
-          <Link to="/app/settings">Settings</Link>. Open the carousel studio at{" "}
+          Agents use Ollama first, then Claude if configured as fallback. Prefer{" "}
+          <strong>Full auto</strong> to run through stages; ingest a company on{" "}
+          <Link to="/app/knowledge">Knowledge</Link> first. Studio:{" "}
           <Link to="/app/carousels">Carousels</Link>.
         </p>
       )}
@@ -100,11 +116,25 @@ export function OverviewPage() {
       {!simulation && allPending && !liveError ? (
         <p className="info-banner">
           Live pipeline is idle — press <strong>Run workflow</strong> to advance
-          from ContextIngestion.
+          from ContextIngestion (needs KB company data).
         </p>
       ) : null}
 
-      <Progress active={processing} label="Agents advancing the experiment loop" />
+      {!simulation && studioPath && contentStage?.status === "completed" ? (
+        <p className="info-banner">
+          Content ready —{" "}
+          <Link to={studioPath}>Open generated carousel in Open Carrusel</Link>
+        </p>
+      ) : null}
+
+      {status.platforms.length === 0 && !simulation ? (
+        <p className="info-banner">
+          No platforms selected yet — PlatformSelection will default some, or set
+          them on <Link to="/app/platforms">Platforms</Link>.
+        </p>
+      ) : null}
+
+      <Progress active={processing || busy} label="Agents advancing the experiment loop" />
 
       <section className="panel">
         <div className="panel-head">
@@ -125,6 +155,14 @@ export function OverviewPage() {
                   {labelStatus(stage.status)}
                 </Badge>
               </div>
+              {stage.summary ? (
+                <p className="stage-summary">{stage.summary}</p>
+              ) : null}
+              {stage.studioPath ? (
+                <p className="stage-summary">
+                  <Link to={stage.studioPath}>Open in Carousels</Link>
+                </p>
+              ) : null}
             </li>
           ))}
         </ol>

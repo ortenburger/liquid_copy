@@ -215,6 +215,19 @@ export class WorkflowEngine {
     return this.currentStage() === null;
   }
 
+  /** Clear all stage progress so Run starts from ContextIngestion again. */
+  reset(): void {
+    for (const stage of WORKFLOW_STAGES) {
+      this.records.set(stage, {
+        stage,
+        status: "pending",
+        approvedByUser: false,
+      });
+    }
+    this.pendingInstructions = undefined;
+    this.emit({ type: "mode_changed", mode: this.getMode() });
+  }
+
   // ---- Execution ----
 
   /**

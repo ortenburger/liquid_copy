@@ -481,9 +481,9 @@ export function SettingsPage() {
           />
         </div>
         <p className="settings-note">
-          Open Carrusel runs inside Liquid Copy at{" "}
-          <Link to="/app/carousels">/app/carousels</Link>. Keep{" "}
-          <code>open-carrusel</code> on this URL (
+          When Content Generation runs, company data from Knowledge is pushed into
+          Open Carrusel brand settings automatically — no second Firecrawl scrape.
+          Keep the studio at this URL (
           <code>cd open-carrusel && npm run dev</code>).
         </p>
         <div className="list-row-actions settings-actions">

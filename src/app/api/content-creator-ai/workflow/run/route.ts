@@ -12,7 +12,15 @@ export async function POST(): Promise<Response> {
   try {
     const { workflow } = getRuntime();
     const result = await workflow.run();
-    return jsonResponse({ ...result, status: workflowStatus() });
+    const status = workflowStatus();
+    return jsonResponse({
+      ...result,
+      status,
+      // Surface ContentGeneration studio deep-link for the UI.
+      contentGeneration:
+        (status.stages.find((s) => s.stage === "ContentGeneration")
+          ?.output as Record<string, unknown> | undefined) ?? undefined,
+    });
   } catch (err) {
     return errorResponse(
       err instanceof Error ? err.message : "Workflow run failed",

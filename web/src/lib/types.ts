@@ -90,6 +90,10 @@ export interface StageRecord {
   stage: WorkflowStage;
   status: StageStatus;
   approvedByUser: boolean;
+  /** Optional stage output summary / payload from the live API. */
+  summary?: string;
+  studioPath?: string;
+  error?: string;
 }
 
 export interface CheckpointRecord {

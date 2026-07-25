@@ -161,6 +161,16 @@ function authHeaders(): HeadersInit {
   if (s.llm.fallbackModel.trim()) {
     headers["X-LLM-Fallback-Model"] = s.llm.fallbackModel.trim();
   }
+  if (s.openCarouselBaseUrl.trim()) {
+    headers["X-Open-Carousel-Base-Url"] = s.openCarouselBaseUrl.trim();
+  }
+  if (
+    s.lastFirecrawlUrl.trim() &&
+    s.lastFirecrawlUrl.trim() !== "https://" &&
+    s.lastFirecrawlUrl.trim() !== "http://"
+  ) {
+    headers["X-Last-Firecrawl-Url"] = s.lastFirecrawlUrl.trim();
+  }
   return headers;
 }
 
@@ -215,11 +225,29 @@ function mapWorkflowStatus(raw: Record<string, unknown>): WorkflowStatus {
         s &&
         typeof s === "object" &&
         (s as { stage?: string }).stage === stage,
-    ) as Partial<StageRecord> | undefined;
+    ) as
+      | (Partial<StageRecord> & {
+          output?: unknown;
+          error?: string;
+        })
+      | undefined;
+    const output =
+      found?.output && typeof found.output === "object"
+        ? (found.output as Record<string, unknown>)
+        : undefined;
     return {
       stage,
       status: (found?.status as StageRecord["status"]) ?? "pending",
       approvedByUser: Boolean(found?.approvedByUser),
+      summary:
+        typeof output?.summary === "string"
+          ? output.summary
+          : found?.error
+            ? String(found.error)
+            : undefined,
+      studioPath:
+        typeof output?.studioPath === "string" ? output.studioPath : undefined,
+      error: found?.error ? String(found.error) : undefined,
     };
   });
 
@@ -331,6 +359,8 @@ export const api = {
         firecrawlApiKey: s.firecrawlApiKey || undefined,
         zernioApiKey: s.zernioApiKey || undefined,
         zernioApiBaseUrl: s.zernioApiBaseUrl || undefined,
+        openCarouselBaseUrl: s.openCarouselBaseUrl || undefined,
+        lastFirecrawlUrl: s.lastFirecrawlUrl || undefined,
         llm: s.llm,
       }),
     });
@@ -356,8 +386,36 @@ export const api = {
 
   async runWorkflow(): Promise<WorkflowStatus> {
     if (useLive()) {
+      const result = await liveFetch<{
+        status: Record<string, unknown>;
+        message?: string;
+        contentGeneration?: { studioPath?: string };
+      }>("/api/content-creator-ai/workflow/run", {
+        method: "POST",
+        body: "{}",
+      });
+      liveStatusCache = mapWorkflowStatus(
+        (result.status ?? result) as Record<string, unknown>,
+      );
+      liveStatusError = null;
+      notifyLiveStatus();
+      const studio =
+        result.contentGeneration?.studioPath ??
+        liveStatusCache.stages.find((s) => s.stage === "ContentGeneration")
+          ?.studioPath;
+      if (studio && typeof window !== "undefined") {
+        // Soft navigate hint — Overview also shows a link.
+        sessionStorage.setItem("liquid-copy.last-studio-path", studio);
+      }
+      return liveStatusCache;
+    }
+    return demoStore.status();
+  },
+
+  async resetWorkflow(): Promise<WorkflowStatus> {
+    if (useLive()) {
       const result = await liveFetch<{ status: Record<string, unknown> }>(
-        "/api/content-creator-ai/workflow/run",
+        "/api/content-creator-ai/workflow/reset",
         { method: "POST", body: "{}" },
       );
       liveStatusCache = mapWorkflowStatus(
@@ -883,6 +941,31 @@ Respond to the latest user message. If tools already ran, incorporate their resu
       }
     }
     return demoStore.readKBEntity(entityId);
+  },
+
+  async getKnowledgeStatus(): Promise<{
+    entityCount: number;
+    indexedDocuments: number;
+    entityIds: string[];
+    storagePath: string;
+  }> {
+    if (!useLive()) {
+      return {
+        entityCount: 0,
+        indexedDocuments: 0,
+        entityIds: [],
+        storagePath: "(simulation)",
+      };
+    }
+    return liveFetch("/api/content-creator-ai/knowledge-base");
+  },
+
+  async clearKnowledge(): Promise<{ removed: string[] }> {
+    if (!useLive()) return { removed: [] };
+    return liveFetch("/api/content-creator-ai/knowledge-base", {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: true }),
+    });
   },
 
   async ingestCompany(companyUrl: string): Promise<unknown> {

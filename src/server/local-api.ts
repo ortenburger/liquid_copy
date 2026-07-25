@@ -14,6 +14,8 @@ import { GET as eventsGet } from "@/app/api/content-creator-ai/events/route.js";
 import {
   GET as kbGet,
   PUT as kbPut,
+  DELETE as kbDelete,
+  POST as kbPost,
 } from "@/app/api/content-creator-ai/knowledge-base/route.js";
 import {
   GET as platformsGet,
@@ -24,14 +26,24 @@ import {
   PUT as workflowModePut,
 } from "@/app/api/content-creator-ai/workflow/status/route.js";
 import { POST as workflowRunPost } from "@/app/api/content-creator-ai/workflow/run/route.js";
+import { POST as workflowResetPost } from "@/app/api/content-creator-ai/workflow/reset/route.js";
 import { POST as checkpointPost } from "@/app/api/content-creator-ai/checkpoints/[stage]/[action]/route.js";
 import { POST as searchPost } from "@/app/api/content-creator-ai/search/route.js";
 import { GET as traceabilityGet } from "@/app/api/content-creator-ai/traceability/[variantId]/route.js";
 import { applyRequestSecrets } from "@/lib/content-creator-ai/api/runtime.js";
 import {
-  reindexAllKBEntities,
+  rebuildVectorIndexFromDisk,
   startRAGReindexListener,
 } from "@/lib/content-creator-ai/rag/reindex.js";
+
+// Keep the vector index in sync when Context Agent commits KB writes.
+startRAGReindexListener({ delayMs: 0 });
+// Disk markdown is the source of truth — rebuild RAG index on every API boot.
+void rebuildVectorIndexFromDisk().catch((err) => {
+  console.warn(
+    `[rag] boot reindex failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
+});
 
 const PORT = Number(process.env.PORT ?? process.env.API_PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -95,11 +107,14 @@ const routes: Route[] = [
   exact("GET", "/api/content-creator-ai/events", eventsGet),
   exact("GET", "/api/content-creator-ai/knowledge-base", kbGet),
   exact("PUT", "/api/content-creator-ai/knowledge-base", kbPut),
+  exact("DELETE", "/api/content-creator-ai/knowledge-base", kbDelete),
+  exact("POST", "/api/content-creator-ai/knowledge-base", kbPost),
   exact("GET", "/api/content-creator-ai/platform-selection", platformsGet),
   exact("POST", "/api/content-creator-ai/platform-selection", platformsPost),
   exact("GET", "/api/content-creator-ai/workflow/status", workflowStatusGet),
   exact("PUT", "/api/content-creator-ai/workflow/status", workflowModePut),
   exact("POST", "/api/content-creator-ai/workflow/run", workflowRunPost),
+  exact("POST", "/api/content-creator-ai/workflow/reset", workflowResetPost),
   exact("POST", "/api/content-creator-ai/search", searchPost),
   pattern(
     "POST",
@@ -117,7 +132,7 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider, X-LLM-Fallback-Api-Key, X-LLM-Fallback-Model",
+    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-Open-Carousel-Base-Url, X-Last-Firecrawl-Url, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider, X-LLM-Fallback-Api-Key, X-LLM-Fallback-Model",
   "Access-Control-Expose-Headers": "Content-Type",
 };
 
@@ -273,15 +288,4 @@ server.listen(PORT, HOST, () => {
     );
   }
 
-  startRAGReindexListener({ delayMs: 0 });
-  void reindexAllKBEntities()
-    .then((n) => {
-      console.log(`[liquid-copy-api] RAG indexed ${n} KB document(s)`);
-    })
-    .catch((err) => {
-      console.warn(
-        "[liquid-copy-api] RAG startup reindex failed:",
-        err instanceof Error ? err.message : err,
-      );
-    });
 });

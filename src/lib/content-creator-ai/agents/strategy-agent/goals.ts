@@ -54,12 +54,20 @@ export interface GenerateGoalOptions {
   llm?: LLMClient;
   /** Skip the RAG query (used by tests that assert pure generation). */
   skipGrounding?: boolean;
+  /**
+   * When true, fill missing industry / businessObjectives via LLM (or
+   * heuristics) so Full Auto can proceed after a thin Firecrawl ingest.
+   * Default false preserves Requirement 3.7 strict notify-only behaviour.
+   */
+  autoEnrichContext?: boolean;
 }
 
 export interface GenerateGoalResult {
   goal?: MarketingGoal;
   /** Populated when context was insufficient (Requirement 3.7). */
   contextSufficiency: ContextSufficiency;
+  /** Identity after optional auto-enrichment (may differ from input). */
+  identity?: CompanyIdentity;
   /** Requirement 14.6 tag when generation ran without retrieved context. */
   contextTag?: string;
   warnings: string[];
@@ -75,6 +83,11 @@ interface LLMGoalShape {
     timePeriod?: string;
     direction?: string;
   }>;
+}
+
+interface LLMContextEnrichShape {
+  industry?: string;
+  businessObjectives?: string[];
 }
 
 function pickPlatform(identity: CompanyIdentity): SocialPlatform {
@@ -110,21 +123,148 @@ function coerceMetrics(raw: LLMGoalShape["successMetrics"]): SuccessMetric[] {
   return metrics;
 }
 
+function heuristicIndustry(identity: CompanyIdentity): string {
+  const blob = [
+    identity.industry,
+    identity.mission,
+    identity.vision,
+    ...(identity.features ?? []),
+    ...(identity.benefits ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (/saas|software|b2b|platform|api|cloud/i.test(blob)) return "SaaS / Software";
+  if (/agency|consult|marketing|brand/i.test(blob)) return "Marketing / Agency";
+  if (/retail|e-?comm|shop|store/i.test(blob)) return "E-commerce / Retail";
+  if (/health|med|clinic|care/i.test(blob)) return "Healthcare";
+  if (/fintech|bank|financ|insur/i.test(blob)) return "Finance";
+  if (/educat|learn|course|school/i.test(blob)) return "Education";
+  return "Professional services";
+}
+
+function heuristicObjectives(identity: CompanyIdentity): string[] {
+  const fromMission = identity.mission?.trim();
+  if (fromMission) {
+    return [
+      `Grow awareness of ${identity.name} among ICP buyers`,
+      `Drive engagement that advances: ${fromMission.slice(0, 120)}`,
+    ];
+  }
+  if (identity.benefits?.length) {
+    return [
+      `Communicate key benefits (${identity.benefits.slice(0, 2).join("; ")})`,
+      `Increase qualified demand for ${identity.name}`,
+    ];
+  }
+  return [
+    `Grow ${identity.name}'s audience and engagement on social media`,
+    `Generate pipeline-ready interest in ${identity.name}`,
+  ];
+}
+
+/**
+ * Fill missing industry / businessObjectives so goal generation can run in
+ * Full Auto when Firecrawl left those fields empty.
+ */
+export async function enrichCompanyContextForGoals(
+  identity: CompanyIdentity,
+  llm: LLMClient = getLLMClient(),
+): Promise<{ identity: CompanyIdentity; warnings: string[]; enriched: boolean }> {
+  const before = assessCompanyContext(identity);
+  if (before.sufficient) {
+    return { identity, warnings: [], enriched: false };
+  }
+  if (!identity.name?.trim()) {
+    return { identity, warnings: [], enriched: false };
+  }
+
+  const warnings: string[] = [];
+  let industry = identity.industry?.trim() ?? "";
+  let businessObjectives = (identity.businessObjectives ?? []).filter(
+    (o) => o.trim().length > 0,
+  );
+
+  const raw = await llm.complete(
+    `Infer missing company planning fields for marketing goal generation.\n` +
+      `Reply with JSON only: { "industry": string, "businessObjectives": string[] }.\n` +
+      `Propose 2–4 concrete business objectives grounded in the mission and product.\n\n` +
+      `Company: ${identity.name}\n` +
+      `Current industry: ${industry || "(missing)"}\n` +
+      `Mission: ${identity.mission || "(unknown)"}\n` +
+      `Vision: ${identity.vision || "(unknown)"}\n` +
+      `Brand voice: ${identity.brandVoice || "(unknown)"}\n` +
+      `Features: ${(identity.features ?? []).slice(0, 8).join("; ") || "none"}\n` +
+      `Benefits: ${(identity.benefits ?? []).slice(0, 8).join("; ") || "none"}\n`,
+    { temperature: 0.3, timeoutMs: 20_000, maxAttempts: 2 },
+  );
+
+  const parsed = parseJSONFromLLM<LLMContextEnrichShape>(raw);
+  if (parsed) {
+    if (
+      !industry &&
+      typeof parsed.industry === "string" &&
+      parsed.industry.trim()
+    ) {
+      industry = parsed.industry.trim();
+    }
+    if (businessObjectives.length === 0 && Array.isArray(parsed.businessObjectives)) {
+      businessObjectives = parsed.businessObjectives
+        .filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+        .map((o) => o.trim())
+        .slice(0, 4);
+    }
+  } else if (raw !== null) {
+    warnings.push("LLM context enrichment was unparseable; used heuristics");
+  } else {
+    warnings.push("LLM unavailable for context enrichment; used heuristics");
+  }
+
+  if (!industry) industry = heuristicIndustry(identity);
+  if (businessObjectives.length === 0) {
+    businessObjectives = heuristicObjectives(identity);
+  }
+
+  const enriched: CompanyIdentity = {
+    ...identity,
+    industry,
+    businessObjectives,
+  };
+  warnings.push(
+    `Auto-filled company context for goal generation (industry + ${businessObjectives.length} objective(s))`,
+  );
+  return { identity: enriched, warnings, enriched: true };
+}
+
 /**
  * Propose an initial marketing goal from KB company context.
  *
  * Returns `goal: undefined` with a message when context is insufficient
- * (Requirement 3.7); otherwise the goal always passes `validateGeneratedGoal`.
+ * (Requirement 3.7), unless `autoEnrichContext` fills the gaps first.
+ * Otherwise the goal always passes `validateGeneratedGoal`.
  */
 export async function generateMarketingGoal(
   options: GenerateGoalOptions,
 ): Promise<GenerateGoalResult> {
-  const { identity } = options;
   const warnings: string[] = [];
+  let identity = options.identity;
 
-  const contextSufficiency = assessCompanyContext(identity);
+  let contextSufficiency = assessCompanyContext(identity);
+  if (!contextSufficiency.sufficient && options.autoEnrichContext) {
+    const filled = await enrichCompanyContextForGoals(
+      identity,
+      options.llm ?? getLLMClient(),
+    );
+    identity = filled.identity;
+    warnings.push(...filled.warnings);
+    contextSufficiency = assessCompanyContext(identity);
+  }
+
   if (!contextSufficiency.sufficient) {
-    return { contextSufficiency, warnings: [contextSufficiency.message] };
+    return {
+      contextSufficiency,
+      identity,
+      warnings: [...warnings, contextSufficiency.message],
+    };
   }
 
   // Requirement 14.1: ground the generation before it begins.
@@ -206,7 +346,7 @@ export async function generateMarketingGoal(
     );
   }
 
-  return { goal, contextSufficiency, contextTag, warnings };
+  return { goal, contextSufficiency, identity, contextTag, warnings };
 }
 
 // ---- Accept / modify / replace (Requirements 3.2–3.6) ----
