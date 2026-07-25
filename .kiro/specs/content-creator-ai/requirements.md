@@ -31,6 +31,8 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 - **CTR**: Click-through rate — a primary engagement metric ingested from Zernio.
 - **Full_Auto_Mode**: An operating mode in which the Platform executes the full workflow end-to-end without human intervention.
 - **Human_In_The_Loop_Mode**: An operating mode in which the Platform pauses at configurable Approval_Checkpoints for human review and approval.
+- **Brand_Signals**: Tone, style, and recurring terminology indicators extracted from company content that characterise the brand's communication identity.
+- **Lessons_Learned**: A discrete field per experiment record capturing performance insights, winning patterns, and failed patterns derived from the Experiment_Evaluation.
 
 ---
 
@@ -42,13 +44,13 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN a company URL is provided, THE Context_Agent SHALL scrape the company website using Firecrawl and extract company name, mission, products, and brand signals.
-2. WHEN Firecrawl returns scraped content, THE Context_Agent SHALL parse the content and populate the Knowledge_Base with structured company identity fields including mission, vision, brand voice, values, products, features, benefits, and pricing.
-3. WHEN the user provides free-text enrichment input, THE Context_Agent SHALL merge the user-provided information with existing Knowledge_Base entries without discarding previously stored data.
-4. IF Firecrawl returns an error or unreachable URL, THEN THE Context_Agent SHALL notify the user with a descriptive error message and allow the user to retry or provide information manually.
+1. WHEN a company URL is provided, THE Context_Agent SHALL scrape the company website using Firecrawl and extract company name, mission, products, and Brand_Signals (tone, style, and recurring terminology indicators).
+2. WHEN Firecrawl returns scraped content, THE Context_Agent SHALL parse the content — processing up to 20 pages or 60 seconds of scraping, whichever limit is reached first — and populate the Knowledge_Base with structured company identity fields including mission, vision, brand voice, values, products, features, benefits, and pricing; IF the user has already provided values for any of these fields, THEN the user-provided values SHALL take precedence over scraped values for those conflicting fields.
+3. WHEN the user provides free-text enrichment input, THE Context_Agent SHALL merge the user-provided information with existing Knowledge_Base entries so that user-provided values take precedence over any conflicting existing values while all non-conflicting fields are preserved unchanged.
+4. IF Firecrawl returns an error or unreachable URL, THEN THE Context_Agent SHALL notify the user with a descriptive error message and present the user with two options: retry the Firecrawl request, OR enter a guided Q&A pipeline in which the Context_Agent prompts the user to provide company context manually through a structured question-and-answer sequence; THE Context_Agent SHALL NOT block any other platform operations while awaiting the user's choice.
 5. WHEN ingestion completes, THE Context_Agent SHALL present a structured company summary to the user for review.
-6. WHEN the user edits the presented company summary, THE Context_Agent SHALL update the Knowledge_Base with the user's modifications and version the change.
-7. WHEN the user rejects the presented company summary, THE Context_Agent SHALL discard the draft and prompt the user to either re-scrape or provide context manually.
+6. WHEN the user edits the presented company summary, THE Context_Agent SHALL update the Knowledge_Base with the user's modifications, create a version entry capturing the timestamp and the prior values of all modified fields, and record the change as a new version.
+7. WHEN the user rejects the presented company summary, THE Context_Agent SHALL discard the draft without modifying the Knowledge_Base and prompt the user to either re-scrape or provide context manually.
 
 ---
 
@@ -58,11 +60,11 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. THE Knowledge_Base SHALL store all company data in agent-friendly Markdown files with a defined schema covering Company_Identity, Products, Audiences, and Experiments sections.
-2. WHEN any Knowledge_Base entry is modified, THE Knowledge_Base SHALL create a versioned snapshot of the previous state before applying the change.
+1. THE Knowledge_Base SHALL store all company data in agent-friendly Markdown files conforming to a defined schema that includes the following top-level sections: Company_Identity, Products, Audiences, and Experiments.
+2. WHEN any Knowledge_Base entry is modified, THE Knowledge_Base SHALL create an immutable versioned snapshot of the previous state before applying the change; once written, a version snapshot SHALL NOT be altered or deleted.
 3. THE RAG_Layer SHALL index all Knowledge_Base content and support semantic similarity search with a query string input, returning the top-k most relevant passages.
-4. WHEN a Knowledge_Base query is executed, THE RAG_Layer SHALL return results within 3 seconds for indexes containing up to 10,000 document chunks.
-5. THE Knowledge_Base SHALL maintain experiment history including Hypothesis definition, Post_Variant identifiers, published dates, analytics results, statistical significance, and Lessons_Learned per experiment.
+4. WHEN a Knowledge_Base query is executed under normal load conditions, THE RAG_Layer SHALL return results within 3 seconds for indexes containing up to 10,000 document chunks.
+5. THE Knowledge_Base SHALL maintain experiment history including Hypothesis definition, Post_Variant identifiers, published dates, analytics results, statistical significance, and a discrete Lessons_Learned field per experiment record.
 6. WHEN the Learning_Agent updates the Knowledge_Base after an experiment concludes, THE Knowledge_Base SHALL record the winning patterns, failed patterns, and updated audience learnings as discrete versioned entries.
 
 ---
@@ -73,12 +75,13 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN company context is available in the Knowledge_Base, THE Strategy_Agent SHALL generate an initial marketing goal that includes a primary objective, target platform, and one or more measurable success metrics.
+1. WHEN company context is available in the Knowledge_Base — meaning the Knowledge_Base contains at minimum the company name, industry, and at least one business objective — THE Strategy_Agent SHALL generate an initial marketing goal that includes a primary objective, target platform, and one or more measurable success metrics, where each measurable success metric specifies a numeric target and a time period.
 2. WHEN the marketing goal is presented to the user, THE Platform SHALL offer the user options to accept, modify, or replace the proposed goal.
-3. WHEN the user accepts the proposed goal, THE Strategy_Agent SHALL store the confirmed goal in the Knowledge_Base and proceed to audience research.
-4. WHEN the user modifies the proposed goal, THE Strategy_Agent SHALL update the stored goal with the user's changes and proceed to audience research.
-5. WHEN the user replaces the proposed goal with a custom goal, THE Strategy_Agent SHALL validate that the custom goal includes an objective and at least one measurable success metric before storing it.
+3. WHEN the user accepts the proposed goal, THE Strategy_Agent SHALL proceed to audience research and store the confirmed goal in the Knowledge_Base concurrently, so that storage does not block audience research from beginning.
+4. WHEN the user modifies the proposed goal, THE Strategy_Agent SHALL validate that the modified goal includes a primary objective and at least one measurable success metric (each with a numeric target and time period) before storing it and proceeding to audience research.
+5. WHEN the user replaces the proposed goal with a custom goal, THE Strategy_Agent SHALL validate that the custom goal includes a primary objective and at least one measurable success metric (each with a numeric target and time period) before storing it; IF the custom goal omits measurable success metrics, THEN THE Strategy_Agent SHALL request the user to add at least one quantifiable metric before proceeding, in the same manner as criterion 6.
 6. IF the user-provided goal omits measurable success metrics, THEN THE Strategy_Agent SHALL request the user to add at least one quantifiable metric before proceeding.
+7. IF company context is absent or insufficient (Knowledge_Base does not contain company name, industry, and at least one business objective), THEN THE Strategy_Agent SHALL notify the user that context must be completed before goal generation can proceed.
 
 ---
 
@@ -88,12 +91,13 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN a marketing goal is confirmed, THE Audience_Agent SHALL research and propose a minimum of two distinct target audience personas, each containing ICP definition, pain points, jobs-to-be-done, objections, and dream outcomes.
+1. WHEN a marketing goal is confirmed, THE Audience_Agent SHALL research and propose a minimum of two and a maximum of five distinct target audience personas within 30 seconds, where "distinct" means that any two proposed personas share fewer than 60% of their field values; each persona SHALL contain ICP definition, pain points, jobs-to-be-done, objections, and dream outcomes.
 2. WHEN audience proposals are presented, THE Platform SHALL allow the user to accept individual personas, edit persona fields, merge two personas into one, or create a new persona from scratch.
 3. WHEN the user accepts an audience persona, THE Audience_Agent SHALL store the persona in the Knowledge_Base Audiences section.
 4. WHEN the user edits an audience persona, THE Audience_Agent SHALL save the edited version as the active persona and version the previous definition.
-5. WHEN the user creates a new audience persona manually, THE Audience_Agent SHALL validate that the persona contains at minimum an ICP definition and at least one pain point before storing it.
-6. IF a stored audience persona conflicts with an existing persona definition by more than 80% semantic similarity, THEN THE Audience_Agent SHALL alert the user to the potential duplication and offer to merge or keep both.
+5. WHEN the user creates a new audience persona manually, THE Audience_Agent SHALL validate that the persona contains at minimum an ICP definition and at least one pain point before storing it; IF validation passes, THE Audience_Agent SHALL store the persona atomically so that a partial write is never committed; IF validation fails, THEN THE Audience_Agent SHALL reject the submission and indicate which required fields are missing.
+6. IF a stored audience persona shares 60% or more field values with an existing persona definition, THEN THE Audience_Agent SHALL alert the user to the potential duplication and offer to merge or keep both.
+7. WHEN two personas are merged, THE Audience_Agent SHALL produce a merged persona that is the union of unique fields from both source personas and SHALL validate that the merged result meets the minimum field requirements before storing it.
 
 ---
 
@@ -104,9 +108,10 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 #### Acceptance Criteria
 
 1. THE Platform SHALL present the user with a selection of supported publishing channels: Instagram, TikTok, LinkedIn, Facebook, Pinterest, Etsy, X, Threads, and YouTube Shorts.
-2. WHEN the user selects one or more platforms, THE Platform SHALL store the selected platforms as the active publishing targets for the current experiment cycle.
-3. WHEN a platform is selected, THE Content_Agent SHALL apply platform-specific formatting constraints including aspect ratio, caption length limits, hashtag policies, and CTA placement rules for that platform.
-4. WHEN no platform is selected, THE Platform SHALL prevent the user from advancing to the content generation phase and display a validation message.
+2. WHEN the user adds or removes a platform selection, THE Platform SHALL immediately update the stored active publishing targets for the current experiment, replacing the previous selection with the updated set.
+3. WHEN a platform is selected, THE Content_Agent SHALL validate generated content against platform-specific formatting constraints — including aspect ratio, caption length limits (in characters), hashtag policies, and CTA placement rules — and SHALL flag any non-conforming content to the user before allowing the user to proceed.
+4. WHEN no platform is selected, THE Platform SHALL prevent the user from advancing to the content generation phase and display a validation message stating that at least one platform must be selected.
+5. IF at least one selected platform has content that passes platform-specific validation, THEN THE Platform SHALL allow the user to advance to the content generation phase for that platform; IF all selected platforms have content that fails platform-specific validation, THEN THE Platform SHALL prevent advancement and notify the user that content must be corrected for at least one platform before proceeding.
 
 ---
 
@@ -116,11 +121,12 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN a confirmed marketing goal and at least one confirmed audience persona exist, THE Strategy_Agent SHALL generate a multi-week experimentation roadmap using OpenCurriculum containing a minimum of one Hypothesis per week.
-2. WHEN generating the roadmap, THE Strategy_Agent SHALL link each Hypothesis to a specific business objective and define at least one measurable success metric per Hypothesis.
-3. WHEN the roadmap is presented, THE Platform SHALL allow the user to review, reorder, add, remove, or modify individual Hypothesis entries before approving the plan.
-4. WHEN the user approves the roadmap, THE Strategy_Agent SHALL store it in the Knowledge_Base and schedule the first Hypothesis for content generation.
+1. WHEN a user-approved marketing goal and at least one user-approved audience persona exist, THE Strategy_Agent SHALL generate a multi-week experimentation roadmap using OpenCurriculum spanning between 2 and 12 weeks and containing a minimum of one Hypothesis per week.
+2. WHEN generating the roadmap, THE Strategy_Agent SHALL link each Hypothesis to a specific business objective and define at least one measurable success metric per Hypothesis, where each measurable success metric includes an indicator name, a target value, and a direction of change.
+3. WHEN the roadmap is presented, THE Platform SHALL require a minimum of one Hypothesis per scheduled week to be present before allowing the user to approve the plan; THE Platform SHALL allow the user to review, reorder, add, remove, or modify individual Hypothesis entries before approving.
+4. WHEN the user approves the roadmap, THE Strategy_Agent SHALL store it in the Knowledge_Base; WHEN storage is confirmed as successful, THE Strategy_Agent SHALL schedule the first Hypothesis for content generation by marking it as active and available for content generation; IF storage fails, THE Strategy_Agent SHALL notify the user and SHALL NOT schedule any Hypothesis until storage succeeds.
 5. WHEN a new experiment cycle begins, THE Strategy_Agent SHALL retrieve previous experiment results from the Knowledge_Base and incorporate Lessons_Learned into the next roadmap iteration.
+6. IF no prior experiment results exist (first experiment cycle), THEN THE Strategy_Agent SHALL generate the roadmap using only the available Knowledge_Base context without incorporating Lessons_Learned.
 
 ---
 
@@ -130,12 +136,13 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN an experiment slot is reached in the roadmap, THE Strategy_Agent SHALL generate a Hypothesis containing all of the following fields: Hook, Angle, Core_Copy, Pain_Point, Theme, Visual_Theme, and Success_Metrics.
-2. WHEN generating a Hypothesis, THE Strategy_Agent SHALL query the RAG_Layer for relevant prior experiment outcomes, winning hooks, and audience learnings to inform the new Hypothesis.
-3. WHEN a Hypothesis references a previously failed pattern identified in the Knowledge_Base, THE Strategy_Agent SHALL flag the conflict to the user and propose an alternative approach.
+1. WHEN an experiment slot is reached in the roadmap, THE Strategy_Agent SHALL generate a Hypothesis containing all of the following fields: Hook, Angle, Core_Copy, Pain_Point, Theme, Visual_Theme, and Success_Metrics; each Success_Metrics entry SHALL include a metric name and a measurable target value.
+2. WHEN generating a Hypothesis, THE Strategy_Agent SHALL query the RAG_Layer for relevant prior experiment outcomes, winning hooks, and audience learnings; THE Strategy_Agent SHALL proceed with Hypothesis generation only after the RAG_Layer returns a minimum of 3 prior outcomes.
+3. IF a Hypothesis references a previously failed pattern — defined as a Knowledge_Base entry with a recorded failure outcome status — THEN THE Strategy_Agent SHALL flag the conflict to the user and propose an alternative approach.
 4. WHEN a Hypothesis is generated, THE Platform SHALL present it to the user for review before content generation begins.
-5. WHEN the user approves a Hypothesis, THE Strategy_Agent SHALL store it in the Knowledge_Base linked to the originating roadmap entry and marketing goal.
-6. WHEN the user modifies a Hypothesis, THE Strategy_Agent SHALL save the modified version and log the original draft as a versioned alternative.
+5. WHEN the user approves a Hypothesis, THE Strategy_Agent SHALL attempt to store it in the Knowledge_Base linked to the originating roadmap entry and marketing goal; IF Knowledge_Base storage fails, THE Strategy_Agent SHALL allow the approval to proceed and display a warning to the user indicating that the Hypothesis was approved but could not be persisted to the Knowledge_Base.
+6. WHEN the user modifies a Hypothesis, THE Strategy_Agent SHALL save the modified version and log the original draft as a versioned alternative retaining the original field values and a timestamp.
+7. IF the user rejects a Hypothesis, THEN THE Strategy_Agent SHALL discard the draft, notify the user of the rejection, and generate a new Hypothesis with revised constraints before presenting it for review.
 
 ---
 
@@ -145,13 +152,15 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN a Hypothesis is approved, THE Content_Agent SHALL generate a minimum of two Post_Variants per selected platform using OpenCarousel.
+1. WHEN a Hypothesis is approved, THE Content_Agent SHALL generate between 2 and 5 Post_Variants per selected platform using OpenCarousel.
 2. WHEN generating Post_Variants, THE Content_Agent SHALL apply the Hypothesis fields (Hook, Angle, Visual_Theme, Core_Copy, CTA) as inputs to OpenCarousel for each variant.
-3. WHEN generating Post_Variants, THE Content_Agent SHALL retrieve brand voice, tone guidelines, and visual theme history from the RAG_Layer and apply them to maintain brand consistency.
-4. WHEN OpenCarousel returns generated content, THE Content_Agent SHALL validate that each Post_Variant includes at minimum: at least one image or slide, a caption, and a CTA.
+3. WHEN generating Post_Variants, THE Content_Agent SHALL retrieve brand voice, tone guidelines, and visual theme history from the RAG_Layer and include them as context inputs to OpenCarousel to maintain brand consistency.
+4. WHEN OpenCarousel returns generated content, THE Content_Agent SHALL validate that each Post_Variant contains at minimum one slide; each slide SHALL contain either an image or text; a caption SHALL be present; an explicit CTA is optional and SHALL NOT be required for validation to pass.
 5. IF OpenCarousel returns an error, THEN THE Content_Agent SHALL log the error, notify the user, and allow the user to retry content generation or provide manual content.
-6. WHEN Post_Variants are ready, THE Platform SHALL present all variants to the user with the originating Hypothesis fields visible for reference.
-7. WHEN the user modifies a Post_Variant, THE Content_Agent SHALL save the modified variant and tag it as human-edited in the experiment record.
+6. IF the RAG_Layer is unavailable during content generation, THEN THE Content_Agent SHALL proceed with the Hypothesis fields only and tag each generated variant as "generated without brand context".
+7. WHEN Post_Variants are ready, THE Platform SHALL present all variants to the user with the originating Hypothesis fields visible for reference.
+8. IF a Post_Variant fails validation (missing required slide containing an image or text, or missing caption), THEN THE Content_Agent SHALL discard the invalid variant, preserve all valid variants, and notify the user of the discarded variant.
+9. WHEN the user modifies a Post_Variant by changing the caption, CTA, images, slides, or their order, THE Content_Agent SHALL save the modified variant, tag it as "human-edited" in the experiment record, and limit regeneration retries for that variant to a maximum of 3 attempts.
 
 ---
 
@@ -161,12 +170,12 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN Post_Variants are approved, THE Platform SHALL queue each Post_Variant for publication to its associated platform with a scheduled publish time.
+1. WHEN Post_Variants are approved, THE Platform SHALL queue each Post_Variant for publication to its associated platform with a scheduled publish time that defaults to the next available scheduling slot for that platform within 24 hours, unless the user specifies an alternative publish time.
 2. WHEN a Post_Variant is published, THE Platform SHALL record the publish timestamp, platform, Post_Variant identifier, and originating Hypothesis identifier as a linked experiment record.
 3. WHEN operating in Full_Auto_Mode, THE Platform SHALL publish queued Post_Variants without requiring human approval at the publishing step.
-4. WHEN operating in Human_In_The_Loop_Mode, THE Platform SHALL pause at the publishing Approval_Checkpoint and require explicit user approval before publishing each batch of Post_Variants.
-5. IF a publishing action fails due to a platform API error, THEN THE Platform SHALL retry the publish attempt up to three times with exponential backoff before marking the Post_Variant as failed and notifying the user.
-6. WHEN a Post_Variant is marked as failed, THE Platform SHALL preserve the Post_Variant and allow the user to manually retry or reschedule publication.
+4. WHEN operating in Human_In_The_Loop_Mode and the publishing queue contains at least one batch of Post_Variants pending publication, THE Platform SHALL pause at the publishing Approval_Checkpoint and require explicit user approval before publishing each batch of Post_Variants, where a "batch" is defined as all Post_Variants sharing the same Hypothesis and publish date; IF the publishing queue is empty, THE Platform SHALL not prompt for approval.
+5. IF a publishing action fails due to a platform API error, THEN THE Platform SHALL retry the publish attempt up to three times using exponential backoff intervals of 1 minute, 2 minutes, and 4 minutes before marking the Post_Variant as failed and notifying the user.
+6. WHEN a Post_Variant is marked as failed, THE Platform SHALL preserve the Post_Variant for a minimum of 30 days and allow the user to manually retry or reschedule publication before the retention period expires.
 
 ---
 
@@ -176,12 +185,13 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN a Post_Variant has been published for a configurable observation window (default: 7 days), THE Analytics_Agent SHALL query Zernio to ingest the following metrics: impressions, CTR, saves, shares, comments, watch_time, conversions, engagement_rate, and follower_growth.
+1. WHEN a Post_Variant has been published for an observation window configurable between 1 and 30 days (default: 7 days), THE Analytics_Agent SHALL query Zernio to ingest the following metrics: impressions, CTR, saves, shares, comments, watch_time, conversions, engagement_rate, and follower_growth.
 2. WHEN analytics data is ingested, THE Analytics_Agent SHALL associate each metric set with the corresponding Post_Variant identifier and Hypothesis identifier in the experiment record.
-3. WHEN analytics data is available for all Post_Variants within an Experiment, THE Analytics_Agent SHALL compute statistical significance of performance differences between variants using a minimum confidence threshold of 95%.
-4. WHEN statistical significance is reached, THE Analytics_Agent SHALL identify the winning Post_Variant and record the result in the experiment record.
-5. IF Zernio returns an error or incomplete data, THEN THE Analytics_Agent SHALL log the error, schedule a retry after 1 hour, and notify the user if data remains unavailable after three retry attempts.
-6. WHEN analytics ingestion completes for an Experiment, THE Analytics_Agent SHALL trigger the Learning_Agent to process the experiment results.
+3. WHEN analytics data is available for all Post_Variants with status "successfully ingested" within an Experiment, THE Analytics_Agent SHALL compute statistical significance of performance differences between variants using engagement_rate as the primary comparator metric and a minimum confidence threshold of 95%.
+4. WHEN statistical significance is reached, THE Analytics_Agent SHALL identify the winning Post_Variant as follows: if one variant has a statistically significantly higher engagement_rate than all others, that variant is the winner; IF statistical significance is reached but no single variant has a statistically significantly higher engagement_rate than all others, THEN THE Analytics_Agent SHALL identify the variant with the highest absolute engagement_rate as the winner; THE Analytics_Agent SHALL record the winning variant and the determination method in the experiment record.
+5. IF Zernio returns an error or incomplete data — defined as fewer than 5 of the 9 required metrics being returned — THEN THE Analytics_Agent SHALL log the error, schedule a retry after 1 hour, and notify the user if data remains unavailable after three retry attempts.
+6. WHEN analytics ingestion completes for an Experiment, THE Analytics_Agent SHALL trigger the Learning_Agent to process the experiment results regardless of whether the experiment outcome is conclusive or inconclusive.
+7. IF statistical significance is not reached within the observation window, THEN THE Analytics_Agent SHALL record the experiment as inconclusive before triggering the Learning_Agent per criterion 6.
 
 ---
 
@@ -191,13 +201,13 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN the Learning_Agent receives completed experiment results, THE Learning_Agent SHALL compare the observed analytics outcomes against the Hypothesis Success_Metrics to produce an Experiment_Evaluation record.
-2. WHEN producing an Experiment_Evaluation, THE Learning_Agent SHALL classify each Post_Variant outcome as: exceeded_expectations, met_expectations, below_expectations, or failed.
-3. WHEN an Experiment_Evaluation is complete, THE Learning_Agent SHALL update the Knowledge_Base with: winning patterns, failed patterns, updated audience learnings, and hook performance data as versioned entries.
-4. WHEN a hook, angle, or visual theme is identified as a winning pattern, THE Learning_Agent SHALL tag it in the Knowledge_Base so the Strategy_Agent can prioritize it in future Hypothesis generation.
-5. WHEN a hook, angle, or visual theme is identified as a failed pattern, THE Learning_Agent SHALL tag it in the Knowledge_Base so the Strategy_Agent avoids repeating it in future Hypotheses.
-6. WHEN the Knowledge_Base is updated after an Experiment_Evaluation, THE Learning_Agent SHALL notify the Strategy_Agent to incorporate the new learnings into the next roadmap iteration.
-7. THE Learning_Agent SHALL never delete or overwrite historical experiment records; all updates SHALL be additive with versioning.
+1. WHEN the Learning_Agent receives completed experiment results — meaning all Post_Variants have a final Analytics_Report AND the Experiment status is "completed" — THE Learning_Agent SHALL compare the observed analytics outcomes against the Hypothesis Success_Metrics to produce an Experiment_Evaluation record.
+2. WHEN producing an Experiment_Evaluation, THE Learning_Agent SHALL classify each Post_Variant outcome using the following thresholds: exceeded_expectations (outcome more than 20% above target), met_expectations (outcome within 20% of target), below_expectations (outcome between 1% and 50% below target), or failed (outcome more than 50% below target).
+3. WHEN an Experiment_Evaluation is complete, THE Learning_Agent SHALL update the Knowledge_Base with immutable version records containing winning patterns, failed patterns, updated audience learnings, and hook performance data; each version record SHALL include Experiment_ID, Evaluation_Timestamp, classification, and pattern attributes.
+4. WHEN a hook, angle, or visual theme is identified as a winning pattern, THE Learning_Agent SHALL tag it in the Knowledge_Base with a recency-weighted priority score greater than 0.0, used by the Strategy_Agent to prioritize it in future Hypothesis generation.
+5. WHEN a hook, angle, or visual theme is identified as a failed pattern, THE Learning_Agent SHALL tag it in the Knowledge_Base with a priority score of 0.0 so the Strategy_Agent excludes it from the candidate pool in future Hypothesis generation.
+6. WHEN the Knowledge_Base is updated after an Experiment_Evaluation, THE Learning_Agent SHALL atomically emit a knowledge_updated event carrying the Experiment_ID and the count of new Knowledge_Base entries as part of the same transaction as the Knowledge_Base write; IF event emission fails, THE Learning_Agent SHALL roll back the Knowledge_Base update so that no partial state is persisted; THE requesting agent SHALL acknowledge the event within 60 seconds, and if no acknowledgement is received after 3 retry attempts, THE Learning_Agent SHALL fall back to logging the failure.
+7. THE Learning_Agent SHALL assign version numbers that are monotonically incrementing per parent Experiment_ID; THE Learning_Agent SHALL never delete or overwrite historical experiment records, and all updates SHALL be additive.
 
 ---
 
@@ -212,9 +222,11 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 3. WHEN Human_In_The_Loop_Mode is active, THE Platform SHALL pause at each configured Approval_Checkpoint and present the pending output to the user before proceeding.
 4. THE Platform SHALL support Approval_Checkpoints at the following stages: Context Review, Goal Review, Audience Review, Roadmap Review, Hypothesis Review, Content Review, Publishing Approval, Experiment Review, and Next Iteration Planning.
 5. WHEN the user configures Human_In_The_Loop_Mode, THE Platform SHALL allow the user to enable or disable individual Approval_Checkpoints independently.
-6. WHEN paused at an Approval_Checkpoint, THE Platform SHALL preserve all pending outputs and allow the user to approve, edit, or reject each item before resuming execution.
-7. WHEN the user rejects an output at an Approval_Checkpoint, THE Platform SHALL allow the user to either regenerate the output with revised instructions or provide a manual replacement.
-8. THE Platform SHALL allow the user to switch between Full_Auto_Mode and Human_In_The_Loop_Mode at any point in the workflow without losing previously approved data.
+6. WHEN paused at an Approval_Checkpoint, THE Platform SHALL preserve all pending outputs and allow the user to approve, edit (defined as inline field modification), or reject each item; IF no user action is taken within 72 hours, THEN THE Platform SHALL auto-escalate the output and notify the user that the item was auto-escalated due to timeout.
+7. WHEN the user rejects an output at an Approval_Checkpoint, THE Platform SHALL require the user to provide either revised regeneration instructions (free-text submitted with the regeneration request) or a manual replacement before the rejection is accepted; THE Platform SHALL NOT allow rejection without one of these two alternatives being supplied.
+8. THE Platform SHALL allow the user to switch between Full_Auto_Mode and Human_In_The_Loop_Mode at any point in the workflow without losing previously approved data; a mode switch SHALL take effect from the next incomplete workflow stage only and SHALL apply only to outputs without prior explicit user approval.
+9. WHEN the user configures Human_In_The_Loop_Mode, THE Platform SHALL enforce a minimum of one enabled Approval_Checkpoint at all times; THE Platform SHALL prevent the user from disabling a checkpoint if it is the last remaining enabled checkpoint and display a message indicating that at least one checkpoint must remain active.
+10. IF the user attempts to disable all Approval_Checkpoints — for example by bypassing the enforcement in criterion 9 or via a bulk-disable action — THEN THE Platform SHALL automatically switch the operating mode to Full_Auto_Mode and notify the user that the mode has been changed because no checkpoints remain enabled.
 
 ---
 
@@ -224,10 +236,11 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. THE Platform SHALL maintain a traceable chain for every Post_Variant linking: source company context version → marketing goal → audience persona → roadmap entry → Hypothesis → Post_Variant → published record → analytics result → Experiment_Evaluation.
-2. WHEN a user queries any Post_Variant, THE Platform SHALL return the complete traceability chain for that variant.
-3. THE Platform SHALL assign a unique identifier to each Hypothesis, Post_Variant, Experiment, and Experiment_Evaluation record at creation time.
-4. WHEN a Post_Variant is human-edited, THE Platform SHALL record the edit event in the traceability chain, preserving both the original AI-generated version and the human-edited version.
+1. THE Platform SHALL maintain a traceable chain for every Post_Variant linking: source company context version → marketing goal → audience persona → roadmap entry → Hypothesis → Post_Variant → published record → analytics result → Experiment_Evaluation; each link in the chain SHALL include the entity's unique ID and creation timestamp.
+2. WHEN a user queries any Post_Variant, THE Platform SHALL return the complete traceability chain for that variant within 3 seconds; for variants that are still in progress, THE Platform SHALL return the available portion of the chain with a status indicator marking the chain as partial.
+3. THE Platform SHALL assign a unique identifier that is globally unique across the Platform to each Hypothesis, Post_Variant, Experiment, and Experiment_Evaluation record at creation time.
+4. WHEN a Post_Variant is human-edited, THE Platform SHALL record the edit event in the traceability chain capturing the actor identity, timestamp, the original AI-generated version, and the human-edited version.
+5. IF a Post_Variant's traceability chain is incomplete because the variant has not yet been published or evaluated, THEN THE Platform SHALL return the available portion of the chain with an "in-progress" status marker.
 
 ---
 
@@ -237,8 +250,9 @@ The platform integrates OpenCarousel (carousel generation), Zernio (analytics & 
 
 #### Acceptance Criteria
 
-1. WHEN any agent generates an output (hypothesis, content, audience, or plan), THE RAG_Layer SHALL be queried with a context-relevant search phrase before generation begins.
-2. WHEN the RAG_Layer returns results, THE requesting agent SHALL incorporate the top-k retrieved passages as grounding context in the generation prompt.
+1. WHEN any agent generates an output (hypothesis, content, audience, or plan), THE RAG_Layer SHALL be queried with a search phrase derived from the agent's current input parameters and output type before generation begins.
+2. WHEN the RAG_Layer returns one or more results, THE requesting agent SHALL incorporate exactly the top 5 retrieved passages (or all available passages if fewer than 5 are returned) as grounding context in the generation prompt; IF the RAG_Layer returns zero results, the 5-passage requirement does not apply and generation proceeds per criterion 6.
 3. THE RAG_Layer SHALL support product-specific context retrieval, company-wide memory retrieval, historical experiment retrieval, and audience learning retrieval as distinct retrieval scopes.
 4. WHEN the Knowledge_Base is updated, THE RAG_Layer SHALL re-index the updated documents within 60 seconds of the update being committed.
-5. THE Platform SHALL expose a manual knowledge search interface allowing users to query the Knowledge_Base directly using natural language.
+5. THE Platform SHALL expose a manual knowledge search interface allowing users to query the Knowledge_Base directly using natural language, returning results within 3 seconds with up to 10 results per query.
+6. IF the RAG_Layer returns zero results OR is unavailable, THEN THE requesting agent SHALL proceed with generation without retrieved context and tag the generated output as "generated without retrieved context".
