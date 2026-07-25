@@ -202,6 +202,11 @@ export class ContextAgent {
     };
     this.drafts.set(draft.id, draft);
 
+    console.info(
+      `[context-agent] created draft ${draft.id} from ${companyUrl} ` +
+        `(${scrape.pageCount} pages, pending accept)`,
+    );
+
     return {
       companySummary: merged,
       // Not yet persisted — the KB version arrives on accept/edit.
@@ -255,14 +260,53 @@ export class ContextAgent {
     return this.drafts.get(draftId)?.summary ?? null;
   }
 
+  /** Pending draft ids (for diagnostics when accept/edit fails). */
+  listDraftIds(): string[] {
+    return [...this.drafts.keys()];
+  }
+
+  /** Snapshot of pending drafts — used when the agent is rebuilt mid-session. */
+  exportDrafts(): Map<string, Draft> {
+    return new Map(this.drafts);
+  }
+
+  /** Restore drafts after a ContextAgent rebuild (config/header refresh). */
+  importDrafts(drafts: Map<string, Draft>): void {
+    for (const [id, draft] of drafts) {
+      this.drafts.set(id, draft);
+    }
+  }
+
+  private missingDraftError(draftId: string, action: string): Error {
+    const known = this.listDraftIds();
+    const detail =
+      known.length === 0
+        ? "No drafts are held in memory."
+        : `Known draft ids: ${known.join(", ")}.`;
+    const hint =
+      "Drafts live only in the running API process. They are cleared if the " +
+      "API restarted, or if ContextAgent was rebuilt without transferring them. " +
+      "Re-run Ingest, then Accept in the same API process.";
+    console.error(
+      `[context-agent] ${action} failed for unknown draft ${draftId}. ${detail} ${hint}`,
+    );
+    return new Error(
+      `Unknown draft: ${draftId}. ${detail} ${hint}`,
+    );
+  }
+
   /** Commit a reviewed draft to the KB, versioning any prior state. */
   async acceptDraft(
     draftId: string,
     author: "system" | "user" = "user",
   ): Promise<ContextIngestResult> {
     const draft = this.drafts.get(draftId);
-    if (!draft) throw new Error(`Unknown draft: ${draftId}`);
+    if (!draft) throw this.missingDraftError(draftId, "accept");
     this.drafts.delete(draftId);
+    console.info(
+      `[context-agent] accepted draft ${draftId}` +
+        (draft.sourceUrl ? ` (source ${draft.sourceUrl})` : ""),
+    );
     const written = await this.persist(draft.summary, author);
     return {
       companySummary: draft.summary,
@@ -283,7 +327,7 @@ export class ContextAgent {
     edits: Partial<CompanyIdentity>,
   ): CompanyIdentity {
     const draft = this.drafts.get(draftId);
-    if (!draft) throw new Error(`Unknown draft: ${draftId}`);
+    if (!draft) throw this.missingDraftError(draftId, "edit");
     draft.summary = deepMergeUserPrecedence(
       draft.summary as unknown as Record<string, unknown>,
       edits as Record<string, unknown>,
@@ -300,6 +344,15 @@ export class ContextAgent {
     nextOptions: readonly ["rescrape", "manual_context"];
   } {
     const discarded = this.drafts.delete(draftId);
+    if (!discarded) {
+      console.warn(
+        `[context-agent] reject for unknown draft ${draftId}. ${
+          this.listDraftIds().length === 0
+            ? "No drafts in memory."
+            : `Known: ${this.listDraftIds().join(", ")}`
+        }`,
+      );
+    }
     return { discarded, nextOptions: ["rescrape", "manual_context"] as const };
   }
 

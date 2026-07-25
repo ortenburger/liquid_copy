@@ -117,17 +117,19 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider",
+    "Content-Type, Authorization, X-Firecrawl-Api-Key, X-Zernio-Api-Key, X-Zernio-Api-Base, X-LLM-Base-Url, X-LLM-Model, X-LLM-Api-Key, X-LLM-Provider, X-LLM-Fallback-Api-Key, X-LLM-Fallback-Model",
   "Access-Control-Expose-Headers": "Content-Type",
 };
 
-async function readBody(req: IncomingMessage): Promise<ArrayBuffer | undefined> {
+async function readBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
   }
   if (chunks.length === 0) return undefined;
-  return Buffer.concat(chunks).buffer;
+  // Do NOT use Buffer.concat(...).buffer — pooled ArrayBuffers have a non-zero
+  // byteOffset and would corrupt JSON.parse in Request.json().
+  return Uint8Array.from(Buffer.concat(chunks));
 }
 
 async function toWebRequest(req: IncomingMessage): Promise<Request> {
@@ -144,10 +146,12 @@ async function toWebRequest(req: IncomingMessage): Promise<Request> {
     }
   }
 
-  const init: RequestInit = { method, headers };
+  const init: RequestInit & { duplex?: "half" } = { method, headers };
   if (method !== "GET" && method !== "HEAD") {
     const body = await readBody(req);
-    if (body) init.body = body;
+    if (body && body.byteLength > 0) {
+      init.body = body;
+    }
   }
   return new Request(url, init);
 }

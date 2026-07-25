@@ -161,6 +161,169 @@ export class OpenAICompatibleLLMClient implements LLMClient {
   }
 }
 
+/** Anthropic Messages API (`/v1/messages`). */
+export class AnthropicLLMClient implements LLMClient {
+  constructor(
+    private readonly options: {
+      apiKey: string;
+      model?: string;
+      baseUrl?: string;
+      fetchImpl?: typeof fetch;
+      maxTokens?: number;
+    },
+  ) {}
+
+  async complete(
+    prompt: string,
+    options: LLMCompletionOptions = {},
+  ): Promise<string | null> {
+    if (!this.options.apiKey.trim()) return null;
+
+    const attempts = Math.max(1, options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    const root = (
+      this.options.baseUrl ?? "https://api.anthropic.com"
+    ).replace(/\/$/, "");
+    const model = this.options.model ?? "claude-sonnet-4-20250514";
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      if (attempt > 1) await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 2));
+      try {
+        const body: Record<string, unknown> = {
+          model,
+          max_tokens: this.options.maxTokens ?? 1024,
+          messages: [{ role: "user", content: prompt }],
+        };
+        if (options.system) body.system = options.system;
+        if (options.temperature !== undefined) {
+          body.temperature = options.temperature;
+        }
+
+        const res = await fetchImpl(`${root}/v1/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": this.options.apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (!res.ok) continue;
+        const data = (await res.json()) as {
+          content?: Array<{ type?: string; text?: string }>;
+        };
+        const text = data.content?.find((c) => c.type === "text")?.text;
+        if (typeof text === "string" && text.length > 0) return text;
+      } catch {
+        // retry
+      }
+    }
+    return null;
+  }
+}
+
+/**
+ * Prefer a fast local primary (Ollama); if it times out / fails, use Claude.
+ */
+export class FallbackLLMClient implements LLMClient {
+  constructor(
+    private readonly primary: LLMClient,
+    private readonly fallback: LLMClient,
+    private readonly primaryTimeoutMs = 8_000,
+  ) {}
+
+  async complete(
+    prompt: string,
+    options: LLMCompletionOptions = {},
+  ): Promise<string | null> {
+    const primary = await this.primary.complete(prompt, {
+      ...options,
+      timeoutMs: Math.min(
+        options.timeoutMs ?? this.primaryTimeoutMs,
+        this.primaryTimeoutMs,
+      ),
+      maxAttempts: Math.min(options.maxAttempts ?? 1, 1),
+    });
+    if (primary !== null) return primary;
+    return this.fallback.complete(prompt, options);
+  }
+}
+
+export interface BuildLLMClientConfig {
+  provider?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  /** Claude key used when primary is Ollama (or any local path). */
+  fallbackApiKey?: string;
+  fallbackModel?: string;
+}
+
+/** Build the process LLM client from Settings / env-shaped config. */
+export function buildLLMClientFromConfig(
+  cfg: BuildLLMClientConfig = {},
+): LLMClient {
+  const provider = (cfg.provider ?? process.env.LLM_PROVIDER ?? "ollama").toLowerCase();
+  const baseUrl = (
+    cfg.baseUrl ??
+    process.env.LLM_BASE_URL ??
+    "http://127.0.0.1:11434"
+  ).replace(/\/$/, "");
+  const model = cfg.model ?? process.env.LLM_MODEL ?? "llama3.1";
+  const apiKey = cfg.apiKey ?? process.env.LLM_API_KEY ?? "";
+  const fallbackApiKey =
+    cfg.fallbackApiKey ?? process.env.LLM_FALLBACK_API_KEY ?? "";
+  const fallbackModel =
+    cfg.fallbackModel ??
+    process.env.LLM_FALLBACK_MODEL ??
+    "claude-sonnet-4-20250514";
+
+  let primary: LLMClient;
+  if (provider === "anthropic") {
+    primary = new AnthropicLLMClient({
+      apiKey: apiKey || fallbackApiKey,
+      model: model || fallbackModel,
+      baseUrl: baseUrl.includes("anthropic")
+        ? baseUrl
+        : "https://api.anthropic.com",
+    });
+  } else if (provider === "openai" || provider === "openai_compatible") {
+    primary = new OpenAICompatibleLLMClient({
+      baseUrl:
+        baseUrl ||
+        (provider === "openai"
+          ? "https://api.openai.com/v1"
+          : "http://127.0.0.1:1234/v1"),
+      model: model || "gpt-4o-mini",
+      apiKey,
+    });
+  } else if (provider === "ollama" || process.env.LLM_BASE_URL || cfg.baseUrl) {
+    primary = new OllamaLLMClient(fetch, baseUrl, model);
+  } else {
+    primary = new UnavailableLLMClient();
+  }
+
+  // Ollama (or local) → Claude if a fallback key is configured.
+  if (
+    fallbackApiKey.trim() &&
+    (provider === "ollama" || provider === "openai_compatible")
+  ) {
+    return new FallbackLLMClient(
+      primary,
+      new AnthropicLLMClient({
+        apiKey: fallbackApiKey.trim(),
+        model: fallbackModel,
+        baseUrl: "https://api.anthropic.com",
+      }),
+      8_000,
+    );
+  }
+
+  return primary;
+}
+
 /**
  * Always-unavailable client. The default in test environments so that agent
  * logic exercises its deterministic heuristic path instead of reaching out to
@@ -190,9 +353,11 @@ export function getLLMClient(): LLMClient {
   if (activeClient) return activeClient;
   // Opt in explicitly: an unset LLM_BASE_URL must not cause every agent call to
   // wait on connection failures to localhost during tests.
-  activeClient = process.env.LLM_BASE_URL
-    ? new OllamaLLMClient()
-    : new UnavailableLLMClient();
+  if (process.env.LLM_BASE_URL || process.env.LLM_PROVIDER || process.env.LLM_FALLBACK_API_KEY) {
+    activeClient = buildLLMClientFromConfig();
+  } else {
+    activeClient = new UnavailableLLMClient();
+  }
   return activeClient;
 }
 

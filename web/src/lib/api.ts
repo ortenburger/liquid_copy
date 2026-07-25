@@ -155,6 +155,12 @@ function authHeaders(): HeadersInit {
   if (s.llm.model.trim()) headers["X-LLM-Model"] = s.llm.model.trim();
   if (s.llm.apiKey.trim()) headers["X-LLM-Api-Key"] = s.llm.apiKey.trim();
   if (s.llm.provider) headers["X-LLM-Provider"] = s.llm.provider;
+  if (s.llm.fallbackApiKey.trim()) {
+    headers["X-LLM-Fallback-Api-Key"] = s.llm.fallbackApiKey.trim();
+  }
+  if (s.llm.fallbackModel.trim()) {
+    headers["X-LLM-Fallback-Model"] = s.llm.fallbackModel.trim();
+  }
   return headers;
 }
 
@@ -165,16 +171,26 @@ async function liveFetch<T>(path: string, init?: RequestInit): Promise<T> {
       "Real data mode is on, but no API base URL is set. Add one in Settings.",
     );
   }
+  const headers = new Headers(authHeaders());
+  if (init?.headers) {
+    new Headers(init.headers).forEach((value, key) => {
+      headers.set(key, value);
+    });
+  }
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: {
-      ...authHeaders(),
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(body || res.statusText);
+    let message = body || res.statusText;
+    try {
+      const parsed = JSON.parse(body) as { error?: string };
+      if (parsed.error) message = parsed.error;
+    } catch {
+      /* keep raw */
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }
@@ -885,10 +901,25 @@ Respond to the latest user message. If tools already ran, incorporate their resu
       throw new Error("Enter a full company URL (e.g. https://example.com).");
     }
     await this.syncConfig();
-    return liveFetch("/api/content-creator-ai/ingest", {
+    const drafted = await liveFetch<{
+      status?: string;
+      draftId?: string;
+      warnings?: string[];
+      companySummary?: { name?: string };
+      kbVersion?: string;
+    }>("/api/content-creator-ai/ingest", {
       method: "POST",
       body: JSON.stringify({ companyUrl }),
     });
+
+    // URL scrapes return a review draft — auto-commit so Knowledge search works.
+    if (drafted.draftId && drafted.status !== "firecrawl_error") {
+      return liveFetch("/api/content-creator-ai/ingest", {
+        method: "POST",
+        body: JSON.stringify({ action: "accept", draftId: drafted.draftId }),
+      });
+    }
+    return drafted;
   },
 
   async listExperiments(): Promise<ExperimentCard[]> {

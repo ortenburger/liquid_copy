@@ -1,38 +1,48 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
+import { Markdown } from "../../components/ui/Markdown";
 import { Progress, StreamingCaret } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
-import { getApiBaseUrl } from "../../lib/settings";
+import { loadSettings, saveSettings } from "../../lib/settings";
 import type { RAGPassage } from "../../lib/types";
 import "./workspace.css";
 
 export function KnowledgePage() {
   const { simulation } = useDataMode();
   const [query, setQuery] = useState("brand voice");
-  const [companyUrl, setCompanyUrl] = useState("https://");
+  const [companyUrl, setCompanyUrl] = useState(
+    () => loadSettings().lastFirecrawlUrl || "https://",
+  );
   const [results, setResults] = useState<RAGPassage[]>([]);
   const [busy, setBusy] = useState(false);
   const [ingestBusy, setIngestBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ingestMsg, setIngestMsg] = useState<string | null>(null);
-  const apiBase = getApiBaseUrl();
-
+  const [searched, setSearched] = useState(false);
   const [answer, setAnswer] = useState<string | null>(null);
+
+  function persistCompanyUrl(url: string) {
+    setCompanyUrl(url);
+    const settings = loadSettings();
+    if (settings.lastFirecrawlUrl === url) return;
+    saveSettings({ ...settings, lastFirecrawlUrl: url });
+  }
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setAnswer(null);
+    setSearched(true);
     try {
       const result = await api.ragAsk(query);
       setResults(result.passages);
       setAnswer(result.answer);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setResults([]);
     } finally {
       setBusy(false);
     }
@@ -40,24 +50,27 @@ export function KnowledgePage() {
 
   async function onIngest(e: FormEvent) {
     e.preventDefault();
+    const url = companyUrl.trim();
+    persistCompanyUrl(url);
     setIngestBusy(true);
     setIngestMsg(null);
     setError(null);
     try {
-      const result = (await api.ingestCompany(companyUrl.trim())) as {
+      const result = (await api.ingestCompany(url)) as {
         status?: string;
         warnings?: string[];
         companySummary?: { name?: string };
         draftId?: string;
+        kbVersion?: string;
       };
       setIngestMsg(
         result.status === "firecrawl_error"
           ? `Firecrawl error${result.warnings?.[0] ? `: ${result.warnings[0]}` : ""}`
-          : `Ingest ${result.status ?? "ok"}${
+          : `Ingested${
               result.companySummary?.name
                 ? ` · ${result.companySummary.name}`
                 : ""
-            }${result.draftId ? ` · draft ${result.draftId}` : ""}`,
+            }${result.kbVersion ? ` · KB ${result.kbVersion}` : ""}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -76,25 +89,17 @@ export function KnowledgePage() {
       </header>
 
       {!simulation ? (
-        <>
-          <p className="info-banner">
-            Live ingest → API at <code>{apiBase ?? "not set"}</code>. Firecrawl
-            key is sent from Settings. Need{" "}
-            <Link to="/app/settings">Settings</Link> saved +{" "}
-            <code>npm run api:dev</code>.
-          </p>
-          <form className="search-form" onSubmit={onIngest}>
-            <Input
-              label="Ingest company URL (Firecrawl)"
-              value={companyUrl}
-              onChange={(e) => setCompanyUrl(e.target.value)}
-              placeholder="https://yourcompany.com"
-            />
-            <Button type="submit" variant="primary" disabled={ingestBusy}>
-              Ingest
-            </Button>
-          </form>
-        </>
+        <form className="search-form" onSubmit={onIngest}>
+          <Input
+            label="Ingest company URL (Firecrawl)"
+            value={companyUrl}
+            onChange={(e) => persistCompanyUrl(e.target.value)}
+            placeholder="https://yourcompany.com"
+          />
+          <Button type="submit" variant="primary" disabled={ingestBusy}>
+            Ingest
+          </Button>
+        </form>
       ) : null}
       {ingestMsg ? <p className="info-banner">{ingestMsg}</p> : null}
 
@@ -123,19 +128,12 @@ export function KnowledgePage() {
             <h2 className="panel-title">Answer</h2>
             <span className="panel-meta">grounded in RAG</span>
           </div>
-          <p className="list-row-body" style={{ whiteSpace: "pre-wrap" }}>
-            {answer}
-            {busy ? <StreamingCaret /> : null}
-          </p>
+          <Markdown source={answer} className="list-row-body" />
+          {busy ? <StreamingCaret /> : null}
         </div>
       ) : null}
 
-      {results.length === 0 && !busy && !answer ? (
-        <p className="empty-hint">
-          Query the knowledge base
-          <StreamingCaret />
-        </p>
-      ) : results.length > 0 ? (
+      {busy ? null : results.length > 0 ? (
         <ul className="list-stack">
           {results.map((passage) => (
             <li
@@ -149,13 +147,24 @@ export function KnowledgePage() {
                     {(passage.similarityScore * 100).toFixed(0)}% match
                   </span>
                 </div>
-                <p className="list-row-body">{passage.content}</p>
+                <Markdown source={passage.content} className="list-row-body" />
                 <p className="card-meta">{passage.sourceDoc}</p>
               </div>
             </li>
           ))}
         </ul>
-      ) : null}
+      ) : searched ? (
+        <p className="empty-hint">
+          {simulation
+            ? "No matching passages in the demo fixtures."
+            : "No passages yet. Ingest a company URL above, then search again."}
+        </p>
+      ) : (
+        <p className="empty-hint">
+          Query the knowledge base
+          <StreamingCaret />
+        </p>
+      )}
     </div>
   );
 }

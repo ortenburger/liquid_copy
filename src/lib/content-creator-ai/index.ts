@@ -39,8 +39,12 @@ export {
 } from "./integrations/opencurriculum.js";
 export {
   OllamaLLMClient,
+  OpenAICompatibleLLMClient,
+  AnthropicLLMClient,
+  FallbackLLMClient,
   UnavailableLLMClient,
   ScriptedLLMClient,
+  buildLLMClientFromConfig,
   getLLMClient,
   setLLMClient,
   resetLLMClient,
@@ -49,6 +53,7 @@ export {
   resolveLLMModel,
   type LLMClient,
   type LLMCompletionOptions,
+  type BuildLLMClientConfig,
 } from "./integrations/llm.js";
 
 // Shared agent helpers

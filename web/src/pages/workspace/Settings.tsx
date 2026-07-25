@@ -82,9 +82,18 @@ export function SettingsPage() {
 
   function onProviderChange(provider: LLMProvider) {
     const next = defaultLLMSettings(provider);
+    // Keep cloud keys when switching providers.
     if (PROVIDER_PRESETS[provider].needsKey) {
-      next.apiKey = settings.llm.apiKey;
+      next.apiKey =
+        settings.llm.apiKey ||
+        (provider === "anthropic" ? settings.llm.fallbackApiKey : "");
     }
+    next.fallbackApiKey =
+      settings.llm.fallbackApiKey ||
+      (settings.llm.provider === "anthropic" ? settings.llm.apiKey : "");
+    next.fallbackModel =
+      settings.llm.fallbackModel || PROVIDER_PRESETS.anthropic.defaultModel;
+    next.temperature = settings.llm.temperature;
     patch({ llm: next });
     setTestOut(null);
   }
@@ -395,6 +404,39 @@ export function SettingsPage() {
             />
           </label>
         </div>
+
+        {llm.provider === "ollama" || llm.provider === "openai_compatible" ? (
+          <div className="settings-fallback">
+            <div className="panel-head">
+              <h3 className="panel-title" style={{ fontSize: "1rem" }}>
+                Claude fallback
+              </h3>
+              <span className="panel-meta">if local is slow or down</span>
+            </div>
+            <div className="settings-fields">
+              <Input
+                label="Anthropic API key (optional)"
+                type="password"
+                autoComplete="off"
+                value={llm.fallbackApiKey}
+                onChange={(e) => patchLlm("fallbackApiKey", e.target.value)}
+                placeholder="sk-ant-…"
+              />
+              <Input
+                label="Claude model"
+                value={llm.fallbackModel}
+                onChange={(e) => patchLlm("fallbackModel", e.target.value)}
+                placeholder={PROVIDER_PRESETS.anthropic.defaultModel}
+                disabled={!llm.fallbackApiKey.trim()}
+              />
+            </div>
+            <p className="settings-note">
+              Primary stays local. If Ollama does not answer within ~8s, the API
+              retries the same prompt on Claude. Synced to the local API when you
+              Save in real-data mode.
+            </p>
+          </div>
+        ) : null}
 
         <div className="list-row-actions settings-actions">
           <Button variant="accent" disabled={busy} onClick={() => void onTest()}>
