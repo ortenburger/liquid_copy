@@ -36,7 +36,7 @@ export function ExperimentsPage() {
           No live experiments yet — run the workflow, queue a carousel on{" "}
           <Link to="/app/test">Test</Link>, then Simulate / Publish to Zernio.
           Simulated publishes also appear on{" "}
-          <Link to="/app/analytics">Analytics</Link>.
+          <Link to="/app/insights">Insights</Link>.
         </p>
       ) : null}
 

@@ -397,7 +397,7 @@ export function createLiquidCopyTools(deps: LiquidCopyToolDeps) {
         });
         return {
           ok: true,
-          message: `Queued “${item.name}” (${item.slideCount} slides). Open Test to preview or publish to Zernio.`,
+          message: `Queued “${item.name}” (${item.slideCount} slides). Review Plan or ask Chat to publish to Zernio.`,
           carouselId: item.id,
           name: item.name,
           aspectRatio: item.aspectRatio,
