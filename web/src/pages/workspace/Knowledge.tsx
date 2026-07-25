@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
+import { Markdown } from "../../components/ui/Markdown";
 import { Progress } from "../../components/ui/Progress";
 import { api } from "../../lib/api";
 import { useDataMode } from "../../lib/hooks";
@@ -132,7 +133,7 @@ export function KnowledgePage() {
                     {(passage.similarityScore * 100).toFixed(0)}% match
                   </span>
                 </div>
-                <p className="list-row-body">{passage.content}</p>
+                <Markdown source={passage.content} className="list-row-body" />
                 <p className="card-meta">{passage.sourceDoc}</p>
               </div>
             </li>

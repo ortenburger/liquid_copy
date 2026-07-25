@@ -1,0 +1,59 @@
+.md-body {
+  color: var(--on-surface-variant);
+  line-height: 1.55;
+  margin-bottom: var(--space-sm);
+  font: var(--text-body);
+}
+
+.md-body > :first-child {
+  margin-top: 0;
+}
+
+.md-body > :last-child {
+  margin-bottom: 0;
+}
+
+.md-h {
+  color: var(--on-surface);
+  font: var(--text-body-bold);
+  margin: 0.85em 0 0.35em;
+  line-height: 1.3;
+}
+
+.md-h1 {
+  font-size: 1.15em;
+}
+
+.md-h2 {
+  font-size: 1.05em;
+}
+
+.md-h3 {
+  font-size: 1em;
+  opacity: 0.92;
+}
+
+.md-p {
+  margin: 0.4em 0;
+}
+
+.md-ul {
+  margin: 0.35em 0 0.5em;
+  padding-left: 1.25em;
+}
+
+.md-ul li {
+  margin: 0.15em 0;
+}
+
+.md-code {
+  font: var(--text-label-mono);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+}
+
+.md-a {
+  color: var(--primary, var(--on-surface));
+  text-underline-offset: 2px;
+}

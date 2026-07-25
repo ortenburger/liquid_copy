@@ -74,7 +74,26 @@ export function resetRuntime(): Runtime {
 /** Rebuild ContextAgent after Firecrawl / LLM env changes. */
 export function refreshContextAgent(): void {
   const rt = getRuntime();
-  rt.contextAgent = buildContextAgent();
+  const previous = rt.contextAgent;
+  const pending = previous?.listDraftIds() ?? [];
+  const next = buildContextAgent();
+  // In-memory drafts must survive config/header refreshes — Knowledge does
+  // ingest then accept as two HTTP calls, each of which may re-apply secrets.
+  if (previous && pending.length > 0) {
+    next.importDrafts(previous.exportDrafts());
+    console.info(
+      `[runtime] refreshed ContextAgent; preserved ${pending.length} draft(s): ${pending.join(", ")}`,
+    );
+  } else {
+    console.info("[runtime] refreshed ContextAgent (no pending drafts)");
+  }
+  rt.contextAgent = next;
+}
+
+function assignEnv(key: string, value: string): boolean {
+  if (process.env[key] === value) return false;
+  process.env[key] = value;
+  return true;
 }
 
 export interface RuntimeConfigInput {
@@ -96,70 +115,101 @@ export interface RuntimeConfigInput {
 /**
  * Apply secrets from the operator UI (or request headers) into process env and
  * refresh clients so the next ingest/search uses them.
+ *
+ * No-ops when values are unchanged, so per-request header sync does not wipe
+ * in-memory ingest drafts between create and accept.
  */
 export function applyRuntimeConfig(input: RuntimeConfigInput): string[] {
   const applied: string[] = [];
 
   if (typeof input.firecrawlApiKey === "string" && input.firecrawlApiKey.trim()) {
-    process.env.FIRECRAWL_API_KEY = input.firecrawlApiKey.trim();
-    applied.push("firecrawlApiKey");
+    if (assignEnv("FIRECRAWL_API_KEY", input.firecrawlApiKey.trim())) {
+      applied.push("firecrawlApiKey");
+    }
   }
 
   if (typeof input.zernioApiKey === "string" && input.zernioApiKey.trim()) {
-    process.env.ZERNIO_API_KEY = input.zernioApiKey.trim();
-    applied.push("zernioApiKey");
+    if (assignEnv("ZERNIO_API_KEY", input.zernioApiKey.trim())) {
+      applied.push("zernioApiKey");
+    }
   }
 
   if (typeof input.zernioApiBaseUrl === "string" && input.zernioApiBaseUrl.trim()) {
-    process.env.ZERNIO_API_BASE = input.zernioApiBaseUrl.trim().replace(/\/$/, "");
-    applied.push("zernioApiBaseUrl");
+    if (
+      assignEnv(
+        "ZERNIO_API_BASE",
+        input.zernioApiBaseUrl.trim().replace(/\/$/, ""),
+      )
+    ) {
+      applied.push("zernioApiBaseUrl");
+    }
   }
 
   const llm = input.llm;
+  let llmChanged = false;
   if (llm) {
-    if (llm.provider) {
-      process.env.LLM_PROVIDER = llm.provider;
+    if (llm.provider && assignEnv("LLM_PROVIDER", llm.provider)) {
       applied.push("llm.provider");
+      llmChanged = true;
     }
-    if (llm.baseUrl?.trim()) {
-      process.env.LLM_BASE_URL = llm.baseUrl.trim().replace(/\/$/, "");
+    if (
+      llm.baseUrl?.trim() &&
+      assignEnv("LLM_BASE_URL", llm.baseUrl.trim().replace(/\/$/, ""))
+    ) {
       applied.push("llm.baseUrl");
+      llmChanged = true;
     }
-    if (llm.model?.trim()) {
-      process.env.LLM_MODEL = llm.model.trim();
+    if (llm.model?.trim() && assignEnv("LLM_MODEL", llm.model.trim())) {
       applied.push("llm.model");
+      llmChanged = true;
     }
-    if (typeof llm.apiKey === "string") {
-      process.env.LLM_API_KEY = llm.apiKey;
+    if (typeof llm.apiKey === "string" && assignEnv("LLM_API_KEY", llm.apiKey)) {
       applied.push("llm.apiKey");
+      llmChanged = true;
     }
-    if (typeof llm.temperature === "number") {
-      process.env.LLM_TEMPERATURE = String(llm.temperature);
+    if (
+      typeof llm.temperature === "number" &&
+      assignEnv("LLM_TEMPERATURE", String(llm.temperature))
+    ) {
       applied.push("llm.temperature");
+      llmChanged = true;
     }
-    if (typeof llm.fallbackApiKey === "string") {
-      process.env.LLM_FALLBACK_API_KEY = llm.fallbackApiKey;
+    if (
+      typeof llm.fallbackApiKey === "string" &&
+      assignEnv("LLM_FALLBACK_API_KEY", llm.fallbackApiKey)
+    ) {
       applied.push("llm.fallbackApiKey");
+      llmChanged = true;
     }
-    if (llm.fallbackModel?.trim()) {
-      process.env.LLM_FALLBACK_MODEL = llm.fallbackModel.trim();
+    if (
+      llm.fallbackModel?.trim() &&
+      assignEnv("LLM_FALLBACK_MODEL", llm.fallbackModel.trim())
+    ) {
       applied.push("llm.fallbackModel");
+      llmChanged = true;
     }
 
-    resetLLMClient();
-    setLLMClient(
-      buildLLMClientFromConfig({
-        provider: process.env.LLM_PROVIDER,
-        baseUrl: process.env.LLM_BASE_URL,
-        model: process.env.LLM_MODEL,
-        apiKey: process.env.LLM_API_KEY,
-        fallbackApiKey: process.env.LLM_FALLBACK_API_KEY,
-        fallbackModel: process.env.LLM_FALLBACK_MODEL,
-      }),
-    );
+    if (llmChanged) {
+      resetLLMClient();
+      setLLMClient(
+        buildLLMClientFromConfig({
+          provider: process.env.LLM_PROVIDER,
+          baseUrl: process.env.LLM_BASE_URL,
+          model: process.env.LLM_MODEL,
+          apiKey: process.env.LLM_API_KEY,
+          fallbackApiKey: process.env.LLM_FALLBACK_API_KEY,
+          fallbackModel: process.env.LLM_FALLBACK_MODEL,
+        }),
+      );
+    }
   }
 
-  if (applied.length > 0) refreshContextAgent();
+  if (applied.length > 0) {
+    console.info(
+      `[runtime] config changed (${applied.join(", ")}) — refreshing ContextAgent`,
+    );
+    refreshContextAgent();
+  }
   return applied;
 }
 

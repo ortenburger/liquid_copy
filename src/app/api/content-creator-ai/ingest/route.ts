@@ -64,9 +64,13 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
   } catch (err) {
-    return errorResponse(
-      err instanceof Error ? err.message : "Ingestion failed",
-      500,
+    const message = err instanceof Error ? err.message : "Ingestion failed";
+    const knownDrafts = contextAgent.listDraftIds();
+    console.error(
+      `[ingest] ${action} failed: ${message}` +
+        (body.draftId ? ` (requested draftId=${body.draftId})` : "") +
+        ` | pendingDrafts=${knownDrafts.length ? knownDrafts.join(",") : "none"}`,
     );
+    return errorResponse(message, 500);
   }
 }
