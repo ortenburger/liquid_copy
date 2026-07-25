@@ -194,7 +194,7 @@ describe("KB merge & storage property tests", () => {
           expect(current!).toContain(second.name);
         },
       ),
-      { numRuns: 25 },
+      { numRuns: 100 },
     );
   });
 
@@ -226,7 +226,7 @@ describe("KB merge & storage property tests", () => {
           SnapshotImmutableError,
         );
       }),
-      { numRuns: 25 },
+      { numRuns: 100 },
     );
   });
 
@@ -318,7 +318,7 @@ describe("KB merge & storage property tests", () => {
           return chain.length >= initialLength + mutations.length;
         },
       ),
-      { numRuns: 20 },
+      { numRuns: 100 },
     );
   });
 
