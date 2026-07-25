@@ -84,7 +84,10 @@ export function TestPage() {
     });
   }
 
-  async function onPublish(carousel: OpenCarouselItem) {
+  async function onPublish(
+    carousel: OpenCarouselItem,
+    options?: { simulate?: boolean },
+  ) {
     if (carousel.status === "published" || carousel.status === "publishing") {
       return;
     }
@@ -98,7 +101,7 @@ export function TestPage() {
       ),
     );
     try {
-      const result = await api.publishCarouselToZernio(carousel);
+      const result = await api.publishCarouselToZernio(carousel, options);
       const status = !result.ok
         ? ("failed" as const)
         : result.mode === "draft"
@@ -177,7 +180,8 @@ export function TestPage() {
 
       <p className="page-lead">
         Queue an Open Carrusel deck, preview it with the studio cards, then
-        publish to Zernio. Configure keys under{" "}
+        publish to Zernio — or use <strong>Simulate Zernio</strong> when the live
+        API is unavailable. Configure keys under{" "}
         <Link to="/app/settings">Settings</Link>
         {!simulation ? (
           <>
@@ -232,11 +236,23 @@ export function TestPage() {
           renderActions={(c) => (
             <>
               <Button
-                variant="accent"
+                variant="ghost"
                 disabled={
                   publishingId === c.id ||
                   c.status === "published" ||
                   c.status === "publishing"
+                }
+                onClick={() => void onPublish(c, { simulate: true })}
+              >
+                {publishingId === c.id ? "Working…" : "Simulate Zernio"}
+              </Button>
+              <Button
+                variant="accent"
+                disabled={
+                  publishingId === c.id ||
+                  c.status === "published" ||
+                  c.status === "publishing" ||
+                  simulation
                 }
                 onClick={() => void onPublish(c)}
               >

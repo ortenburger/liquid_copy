@@ -19,6 +19,10 @@ import {
 } from "./open-carousel";
 import { getApiBaseUrl, isDemoWorkspace, loadSettings } from "./settings";
 import { PLAN_CHECKPOINT_STAGES } from "./simple-ui-nav";
+import {
+  recordSimulatedPublish,
+  simulatedPublishesToAnalyticsRows,
+} from "./zernio-simulate";
 import type {
   AnalyticsRow,
   AnalyticsSummary,
@@ -1436,22 +1440,26 @@ Answer:`;
       "winning hooks experiment outcomes engagement metrics",
       { scope: "experiment_history", limit: 8 },
     );
+    const simulated = simulatedPublishesToAnalyticsRows();
 
-    const rows: AnalyticsRow[] = experiments.map((e) => ({
-      id: e.id,
-      title: e.title,
-      hook: e.hook,
-      platform: e.platform,
-      status: e.status,
-      impressions: 0,
-      engagementRate: 0,
-      ctr: 0,
-      saves: 0,
-      shares: 0,
-      comments: 0,
-      winner: e.status === "won",
-      note: passages.find((p) => p.sourceDoc.includes(e.id))?.content.slice(0, 160),
-    }));
+    const rows: AnalyticsRow[] = [
+      ...simulated,
+      ...experiments.map((e) => ({
+        id: e.id,
+        title: e.title,
+        hook: e.hook,
+        platform: e.platform,
+        status: e.status,
+        impressions: 0,
+        engagementRate: 0,
+        ctr: 0,
+        saves: 0,
+        shares: 0,
+        comments: 0,
+        winner: e.status === "won",
+        note: passages.find((p) => p.sourceDoc.includes(e.id))?.content.slice(0, 160),
+      })),
+    ];
 
     if (rows.length === 0 && passages.length > 0) {
       for (const [i, p] of passages.entries()) {
@@ -1472,16 +1480,22 @@ Answer:`;
       }
     }
 
-    const winner = rows.find((r) => r.winner) ?? rows[0];
+    const winner =
+      rows.find((r) => r.winner) ??
+      rows.find((r) => r.impressions > 0) ??
+      rows[0];
+    const hasSim = simulated.length > 0;
     return {
       rows,
       winnerId: winner?.id,
       inconclusive: rows.every((r) => r.impressions === 0),
       summary:
         passages[0]?.content.slice(0, 280) ??
-        (rows.length
-          ? `${rows.length} experiment rows loaded. Configure Zernio for live metrics.`
-          : "No analytics yet — publish experiments and connect Zernio."),
+        (hasSim
+          ? `${simulated.length} simulated Zernio publish(es) with demo metrics.`
+          : rows.length
+            ? `${rows.length} experiment rows loaded. Configure Zernio for live metrics, or use Simulate Zernio on Test.`
+            : "No analytics yet — publish experiments, Simulate Zernio on Test, or connect Zernio."),
       updatedAt: new Date().toISOString(),
     };
   },
@@ -1552,9 +1566,12 @@ Answer:`;
 
   /**
    * Create a Zernio post (live publish or draft) from a queued carousel.
-   * Simulation: local success. Real: POST https://zernio.com/api/v1/posts
+   * Pass `{ simulate: true }` to skip the real API (works in real-data mode).
    */
-  async publishCarouselToZernio(carousel: OpenCarouselItem): Promise<{
+  async publishCarouselToZernio(
+    carousel: OpenCarouselItem,
+    options?: { simulate?: boolean },
+  ): Promise<{
     ok: boolean;
     mode: "live" | "draft" | "recorded" | "simulation";
     postVariantId: string;
@@ -1567,20 +1584,30 @@ Answer:`;
       carousel.postVariantId ||
       `pv-${carousel.id.slice(0, 20)}-${Date.now().toString(36)}`;
 
-    if (!useLive()) {
+    const forceSimulate = options?.simulate === true || !useLive();
+    if (forceSimulate) {
+      const s = loadSettings();
+      const sim = recordSimulatedPublish({
+        carouselId: carousel.id,
+        name: carousel.name,
+        postVariantId,
+        platform: s.zernioPlatform || "linkedin",
+        caption: carousel.caption,
+      });
       return {
         ok: true,
         mode: "simulation",
         postVariantId,
-        publishedAt: new Date().toISOString(),
-        message: `Simulation · registered ${postVariantId} with Zernio (demo).`,
+        publishedAt: sim.publishedAt,
+        message: `Simulated Zernio publish · ${sim.impressions.toLocaleString()} impressions · ${(sim.engagementRate * 100).toFixed(1)}% engagement (demo metrics). Open Analytics to review.`,
+        zernioPostId: `sim-post-${sim.id}`,
       };
     }
 
     const s = loadSettings();
     if (!s.zernioApiKey.trim()) {
       throw new Error(
-        "Add your Zernio API key in Settings, switch to real-data mode, Save, then retry.",
+        "Zernio API key missing — use Simulate Zernio, or add a key in Settings and retry live publish.",
       );
     }
 
@@ -1640,7 +1667,7 @@ Answer:`;
       const msg = e instanceof Error ? e.message : String(e);
       if (/No route for POST .*zernio\/publish/i.test(msg)) {
         throw new Error(
-          "API is missing /zernio/publish — restart with npm run api:dev (or npm run dev:stack) so the new route loads.",
+          "API is missing /zernio/publish — restart with npm run api:dev (or npm run dev:stack) so the new route loads. Or use Simulate Zernio.",
         );
       }
       throw e;
